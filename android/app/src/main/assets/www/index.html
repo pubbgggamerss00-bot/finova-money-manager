@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b1120">
+<title>فینوا | مدیریت هوشمند مالی</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="appRoot" class="app-root">
+
+  <!-- صفحه قفل -->
+  <div id="lockScreen" class="lock-screen hidden">
+    <div class="lock-inner">
+      <div class="lock-logo">
+        <div class="lock-glyph">◈</div>
+        <h1>فینوا</h1>
+        <p id="lockHint">برای ورود رمز عبور خود را وارد کنید</p>
+      </div>
+      <div id="lockDots" class="lock-dots"></div>
+      <div id="pinPad" class="pin-pad"></div>
+      <button id="bioBtn" class="btn-ghost bio-btn hidden">🔓 ورود با اثر انگشت / قفل دستگاه</button>
+    </div>
+  </div>
+
+  <!-- نوار بالا -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <span class="brand-glyph">◈</span>
+      <div class="brand-text">
+        <strong id="topTitle">فینوا</strong>
+        <small id="topDate">—</small>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button id="themeBtn" class="icon-btn" title="حالت شب/روز">🌙</button>
+      <button id="menuBtn" class="icon-btn" title="بیشتر">⋮</button>
+    </div>
+  </header>
+
+  <!-- منوی کشویی -->
+  <div id="menuSheet" class="sheet-backdrop hidden">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <h3 class="sheet-title">بخش‌های بیشتر</h3>
+      <button class="sheet-item" data-go="budgets"><span class="si-ico">🎯</span><span>بودجه‌بندی ماهانه</span></button>
+      <button class="sheet-item" data-go="goals"><span class="si-ico">🏆</span><span>اهداف مالی و بدهی‌ها</span></button>
+      <button class="sheet-item" data-go="challenge"><span class="si-ico">🔥</span><span>چالش ۳۰ روزه پس‌انداز</span></button>
+      <button class="sheet-item" data-go="settings"><span class="si-ico">⚙️</span><span>تنظیمات</span></button>
+      <button class="sheet-item sheet-cancel">بستن</button>
+    </div>
+  </div>
+
+  <!-- محتوای اصلی -->
+  <main id="view" class="view"></main>
+
+  <!-- دکمه شناور -->
+  <button id="fab" class="fab" title="ثبت جدید">＋</button>
+
+  <!-- نوار پایین -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-tab="dashboard"><span class="nv-ico">🏠</span><span class="nv-txt">خانه</span></button>
+    <button class="nav-btn" data-tab="transactions"><span class="nv-ico">💳</span><span class="nv-txt">تراکنش‌ها</span></button>
+    <button class="nav-btn" data-tab="installments"><span class="nv-ico">📅</span><span class="nv-txt">اقساط</span></button>
+    <button class="nav-btn" data-tab="analytics"><span class="nv-ico">📊</span><span class="nv-txt">گزارش</span></button>
+    <button class="nav-btn" data-tab="ai"><span class="nv-ico">🤖</span><span class="nv-txt">دستیار</span></button>
+  </nav>
+
+  <div id="toastWrap" class="toast-wrap"></div>
+  <div id="modalRoot"></div>
+</div>
+
+<script src="js/jalali.js"></script>
+<script src="js/store.js"></script>
+<script src="js/bridge.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

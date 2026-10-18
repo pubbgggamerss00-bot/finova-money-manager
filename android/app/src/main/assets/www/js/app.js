@@ -1,0 +1,1519 @@
+/* ═══════════════════ فینوا — منطق اصلی اپلیکیشن ═══════════════════ */
+const App = (() => {
+  let state = {};        // تنظیمات
+  let txs = [], rules = [], budgets = [], goals = [], wallets = [], categories = [];
+  let curTab = 'dashboard';
+  let lastRates = null;
+  let unlocked = false;
+
+  const DEF_CATEGORIES = [
+    { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment' },
+    { id: 'c_inst', name: 'قسط وام', icon: '🏦', essential: true, type: 'installment' },
+    { id: 'c_food', name: 'خوراک', icon: '🍚', essential: true, type: 'expense' },
+    { id: 'c_util', name: 'قبض و خدمات', icon: '💡', essential: true, type: 'expense' },
+    { id: 'c_transport', name: 'حمل‌ونقل', icon: '🚌', essential: true, type: 'expense' },
+    { id: 'c_health', name: 'درمان', icon: '💊', essential: true, type: 'expense' },
+    { id: 'c_edu', name: 'آموزش', icon: '📚', essential: false, type: 'expense' },
+    { id: 'c_fun', name: 'تفریح', icon: '🎮', essential: false, type: 'expense' },
+    { id: 'c_cloth', name: 'پوشاک', icon: '👕', essential: false, type: 'expense' },
+    { id: 'c_shop', name: 'خرید متفرقه', icon: '🛍️', essential: false, type: 'expense' },
+    { id: 'c_salary', name: 'حقوق', icon: '💼', type: 'income' },
+    { id: 'c_side', name: 'درآمد جانبی', icon: '🧰', type: 'income' },
+  ];
+  const DEF_WALLETS = [
+    { id: 'w_main', name: 'کیف پول اصلی', kind: 'cash' },
+    { id: 'w_bank', name: 'حساب بانکی', kind: 'bank' },
+  ];
+  const CURR = { TMN: { name: 'تومان', sign: 'ت', rate: 1 }, USD: { name: 'دلار', sign: '$', rate: 100 }, USDT: { name: 'تتر', sign: '₮', rate: 100 }, EUR: { name: 'یورو', sign: '€', rate: 110 } };
+
+  /* ───────── راه‌اندازی ───────── */
+  async function boot() {
+    bindChrome();
+    try {
+      await Store.open();
+    } catch (e) {
+      console.error('DB open failed:', e);
+      document.getElementById('view').innerHTML =
+        '<div class="empty" style="margin-top:60px"><div class="big">⚠️</div><b>خطا در باز کردن پایگاه داده</b><br><br>' +
+        '<button class="btn" onclick="location.reload()">تلاش مجدد</button></div>';
+      return;
+    }
+    try { await Store.migrateLegacyLocalStorage(); } catch (e) { console.warn('legacy migrate', e); }
+    try { state = (await Store.get('kv', 'settings')) || {}; } catch (e) { state = {}; }
+    if (state.v !== 2 || !state.lock) state = Object.assign(defaultState(), state, { v: 2 });
+    try { categories = (await Store.all('categories')) || []; } catch (e) { categories = []; }
+    if (!categories.length) { categories = DEF_CATEGORIES.slice(); try { await Store.bulkPut('categories', categories); } catch (e) {} }
+    try { wallets = (await Store.all('wallets')) || []; } catch (e) { wallets = []; }
+    if (!wallets.length) { wallets = DEF_WALLETS.slice(); try { await Store.bulkPut('wallets', wallets); } catch (e) {} }
+    try { txs = ((await Store.all('transactions')) || []).map(normTx); } catch (e) { txs = []; }
+    try { rules = ((await Store.all('rules')) || []).map(normRule); } catch (e) { rules = []; }
+    try { budgets = (await Store.all('budgets')) || []; } catch (e) { budgets = []; }
+    try { goals = ((await Store.all('goals')) || []).map(normGoal); } catch (e) { goals = []; }
+
+    applyTheme();
+    document.getElementById('topDate').textContent = todayLabel();
+
+    // قفل
+    if (state.lock && state.lock.enabled) { showLock(); } else { unlocked = true; afterUnlock(); }
+  }
+
+  function defaultState() {
+    return {
+      v: 2, dark: true, fontScale: 1,
+      lock: { enabled: false, pinHash: '', salt: '' },
+      strict: { enabled: false, pct: 20 },
+      notify: { days: [7, 3, 1], budgetAlert: true, balanceAlert: true },
+      aiBaseURL: 'https://api.openai.com/v1', aiApiKey: '', aiModel: 'gpt-4o-mini',
+      manualUSD: '', manualGold: '',
+      backup: { auto: true, lastAt: 0 },
+      seedDone: false, notifShown: {},
+    };
+  }
+  async function saveState() { state.notifShown = state.notifShown || {}; await Store.put('kv', state, 'settings'); }
+
+  function afterUnlock() {
+    generateRecurring();
+    render(curTab);
+    scheduleNotifications();
+    Bridge.updateWidget(
+      fmtShort(walletBalance()) + ' تومان',
+      nextInstallmentLine(0), nextInstallmentLine(1),
+      jDateLabel(jKey(jToday()))
+    );
+    autoBackup();
+    // قیمت‌ها در پس‌زمینه
+    AI.fetchRates().then(r => { lastRates = r; App.lastRates = r; if (curTab === 'ai') render(curTab); }).catch(() => {});
+  }
+
+  /* ───────── محاسبات ───────── */
+  function walletBalance() {
+    return wallets.reduce((acc, w) => {
+      const delta = txs.reduce((a, t) => {
+        if (t.walletId !== w.id || t.status !== 'paid') return a;
+        if (t.type === 'income') return a + t.amount * t.rate;
+        return a - t.amount * t.rate;
+      }, 0);
+      return acc + (+w.initial || 0) + delta;
+    }, 0);
+  }
+  function monthStats(mk) {
+    mk = mk || jMonthKey(jToday());
+    const m = txs.filter(t => t.jdate.startsWith(mk));
+    const sum = (type, st) => m.filter(t => t.type === type && (st ? t.status === st : true)).reduce((a, t) => a + t.amount * t.rate, 0);
+    return {
+      income: sum('income', 'paid'), expense: sum('expense', 'paid'),
+      installPaid: sum('installment', 'paid'),
+      installPending: m.filter(t => t.type === 'installment' && t.status === 'pending').reduce((a, t) => a + t.amount * t.rate, 0),
+    };
+  }
+  function healthScore() {
+    const s = monthStats();
+    const rate = s.income > 0 ? (s.income - s.expense - s.installPaid) / s.income : 0;
+    const sc1 = Math.max(0, Math.min(1, rate / 0.2)) * 30;                       // نرخ پس‌انداز
+    const bs = budgets.filter(b => b.jmonth === jMonthKey(jToday()));
+    let sc2 = 12.5;
+    if (bs.length) {
+      const ok = bs.filter(b => {
+        const spent = txs.filter(t => t.type === 'expense' && t.status === 'paid' && t.jdate.startsWith(jMonthKey(jToday())) && t.categoryId === b.categoryId).reduce((a, t) => a + t.amount * t.rate, 0);
+        return spent <= b.limit;
+      }).length;
+      sc2 = (ok / bs.length) * 25;
+    }
+    const allInst = txs.filter(t => t.type === 'installment' && t.status === 'paid');
+    const overdue = txs.filter(t => t.type === 'installment' && t.status === 'pending' && t.dueJdate && daysUntilJ(t.dueJdate) < 0);
+    const sc3 = overdue.length ? 0 : (allInst.length ? 20 : 10);                 // بدهی معوق
+    const months = s.income > 0 ? (walletBalance() / Math.max(1, s.expense + s.installPaid)) : 0;
+    const sc4 = Math.max(0, Math.min(1, months / 3)) * 25;                       // صندوق اضطراری
+    return Math.round(sc1 + sc2 + sc3 + sc4);
+  }
+  function nextInstallmentLine(i) {
+    const p = txs.filter(t => t.type === 'installment' && t.status === 'pending')
+      .sort((a, b) => instSort(a) - instSort(b))[i];
+    if (!p) return i === 0 ? 'قسط پرداخت‌نشده ندارید' : '';
+    return `${p.title}: ${fmtShort(p.amount * p.rate)} (${p.dueJdate ? jDateLabel(p.dueJdate) : '—'})`;
+  }
+  function instSort(t) {
+    const d = t.dueJdate ? daysUntilJ(t.dueJdate) : 999;
+    return d * 10 + (t.essential ? -100 : 0) + (+t.priority || 3);
+  }
+
+  /* ───────── تولید خودکار اقساط تکرارشونده (ضدتکرار) ───────── */
+  function generateRecurring() {
+    const t = jToday();
+    let created = 0;
+    rules.filter(r => r.active).forEach(r => {
+      const createdMk = r.createdMk || jMonthKey(t);
+      for (let back = 1; back >= 0; back--) { // ماه قبل + این ماه (پوشش غیبت) فقط برای قوانین قدیمی
+        const mm = addJMonths(t, -back);
+        if (jMonthKey(mm) < createdMk) continue; // قبل از ساخت قانون تولید نشود
+        const maxD = Jalali.monthLength(mm.jy, mm.jm);
+        const day = Math.min(r.day, maxD);
+        const mk = jMonthKey(mm);
+        const key = r.id + '@' + mk;
+        if (r.lastKey === key) continue;
+        const exists = txs.some(x => x.ruleId === r.id && x.jdate.startsWith(mk));
+        if (exists) { r.lastKey = key; continue; }
+        const due = `${mk}/${String(day).padStart(2, '0')}`;
+        txs.push(normTx({
+          id: uid('tx'), type: 'installment', title: r.title,
+          amount: r.variable ? 0 : r.amount, currency: 'TMN', rate: 1,
+          categoryId: r.categoryId, walletId: r.walletId,
+          jdate: due, dueJdate: due, status: 'pending',
+          priority: r.priority, essential: r.essential, ruleId: r.id, seq: (r.seq || 0) + 1,
+        }));
+        r.lastKey = key; r.seq = (r.seq || 0) + 1; created++;
+      }
+    });
+    if (created) { persist('rules'); persist('transactions'); }
+  }
+
+  async function persist(kind) {
+    if (kind === 'transactions') await Store.bulkPut('transactions', txs);
+    if (kind === 'rules') await Store.bulkPut('rules', rules);
+    if (kind === 'budgets') await Store.bulkPut('budgets', budgets);
+    if (kind === 'goals') await Store.bulkPut('goals', goals);
+    if (kind === 'wallets') await Store.bulkPut('wallets', wallets);
+    if (kind === 'categories') await Store.bulkPut('categories', categories);
+  }
+
+  /* ───────── اعلان‌ها ───────── */
+  async function scheduleNotifications() {
+    if (!Bridge.hasNative()) return;
+    const perm = await Bridge.hasNotifPermission();
+    if (!perm) { await Bridge.requestNotifPermission(); }
+    const days = (state.notify && state.notify.days) || [7, 3, 1];
+    const shown = state.notifShown || {};
+    const now = Date.now();
+    txs.filter(t => t.type === 'installment' && t.status === 'pending' && t.dueJdate).forEach(t => {
+      const d = daysUntilJ(t.dueJdate);
+      let level = null, msg = '';
+      if (d < 0) { level = 'over'; msg = `قسط «${t.title}» به ارزش ${fmtToman(t.amount * t.rate)} معوق شده است!`; }
+      else if (d === 0) { level = 'd0'; msg = `امروز موعد قسط «${t.title}» است (${fmtToman(t.amount * t.rate)}).`; }
+      else if (days.includes(d)) { level = 'd' + d; msg = `قسط «${t.title}» ${faDigits(d)} روز دیگر موعد می‌شود (${fmtToman(t.amount * t.rate)}).`; }
+      if (!level) return;
+      const key = t.id + ':' + level;
+      if (shown[key] && now - shown[key] < 86400000 * 1.5) return;
+      Bridge.showNotification(level === 'over' ? '⚠️ قسط معوق — فینوا' : '📅 یادآوری قسط — فینوا', msg, Math.abs(hashCode(key)) % 30000, key);
+      shown[key] = now;
+    });
+    // هشدار بودجه
+    if (state.notify && state.notify.budgetAlert) {
+      const mk = jMonthKey(jToday());
+      budgets.filter(b => b.jmonth === mk).forEach(b => {
+        const spent = txs.filter(t => t.type === 'expense' && t.status === 'paid' && t.jdate.startsWith(mk) && t.categoryId === b.categoryId).reduce((a, t) => a + t.amount * t.rate, 0);
+        if (spent > b.limit) {
+          const key = 'budget:' + b.id + ':' + mk;
+          if (!shown[key] || now - shown[key] > 86400000 * 2) {
+            const cat = categories.find(c => c.id === b.categoryId);
+            Bridge.showNotification('🚨 اتمام بودجه — فینوا', `بودجه «${cat ? cat.name : ''}» تمام شد. خرج: ${fmtToman(spent)} از ${fmtToman(b.limit)}`, Math.abs(hashCode(key)) % 30000, key);
+            shown[key] = now;
+          }
+        }
+      });
+    }
+    state.notifShown = shown;
+    await saveState();
+  }
+  function hashCode(s) { let h = 0; for (let i = 0; i < s.length; i++) { h = ((h << 5) - h) + s.charCodeAt(i); h |= 0; } return h; }
+
+  /* ───────── قفل ───────── */
+  async function showLock() {
+    const ls = document.getElementById('lockScreen');
+    ls.classList.remove('hidden');
+    document.getElementById('lockHint').textContent = 'برای ورود رمز خود را وارد کنید';
+    const dots = document.getElementById('lockDots');
+    const pad = document.getElementById('pinPad');
+    dots.innerHTML = '<span></span><span></span><span></span><span></span>';
+    let buf = '';
+    const layout = ['۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹', 'پاک', '۰', 'ورود'];
+    pad.innerHTML = layout.map(k => `<button data-k="${k}">${k}</button>`).join('');
+    pad.onclick = (e) => {
+      const k = e.target.getAttribute('data-k'); if (!k) return;
+      Bridge.vibrate(20);
+      if (k === 'پاک') { buf = buf.slice(0, -1); }
+      else if (k === 'ورود') { verify(buf); buf = ''; }
+      else if (buf.length < 4) buf += k;
+      [...dots.children].forEach((s, i) => s.classList.toggle('f', i < buf.length));
+      if (buf.length >= 4 && k !== 'ورود') verify(buf);
+    };
+    const canBio = await Bridge.canBiometric();
+    const bioBtn = document.getElementById('bioBtn');
+    if (canBio) {
+      bioBtn.classList.remove('hidden');
+      bioBtn.onclick = async () => {
+        const r = await Bridge.biometricAuth();
+        if (r.ok) unlockNow();
+        else if (r.msg && r.msg !== 'timeout') UI.toast('احراز هویت ناموفق: ' + r.msg, 'bad');
+      };
+    }
+    function verify(code) {
+      const h = simpleHash(enDigits(code) + (state.lock.salt || ''));
+      if (h === state.lock.pinHash) unlockNow();
+      else {
+        dots.classList.add('shake'); Bridge.vibrate([60, 40, 60]);
+        setTimeout(() => dots.classList.remove('shake'), 450);
+        buf = ''; [...dots.children].forEach(s => s.classList.remove('f'));
+      }
+    }
+    async function unlockNow() {
+      unlocked = true; ls.classList.add('hidden');
+      await Bridge.vibrate(30);
+      afterUnlock();
+    }
+  }
+  function simpleHash(s) {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h) + s.charCodeAt(i) | 0;
+    return String(h >>> 0);
+  }
+
+  /* ───────── پشتیبان‌گیری ───────── */
+  function exportPayload() {
+    return JSON.stringify({ app: 'finova', v: 2, at: new Date().toISOString(), data: { state, txs, rules, budgets, goals, wallets, categories } });
+  }
+  async function importPayload(text) {
+    try {
+      const j = JSON.parse(text);
+      if (!j || j.app !== 'finova' || !j.data) return UI.toast('فایل پشتیبان نامعتبر است', 'bad');
+      if (Array.isArray(j.data.txs)) { txs = j.data.txs.map(normTx); await Store.clear('transactions'); await Store.bulkPut('transactions', txs); }
+      if (Array.isArray(j.data.rules)) { rules = j.data.rules.map(normRule); await Store.clear('rules'); await Store.bulkPut('rules', rules); }
+      if (Array.isArray(j.data.budgets)) { budgets = j.data.budgets; await Store.clear('budgets'); await Store.bulkPut('budgets', budgets); }
+      if (Array.isArray(j.data.goals)) { goals = j.data.goals.map(normGoal); await Store.clear('goals'); await Store.bulkPut('goals', goals); }
+      if (Array.isArray(j.data.wallets)) { wallets = j.data.wallets.map(normWallet); await Store.clear('wallets'); await Store.bulkPut('wallets', wallets); }
+      if (Array.isArray(j.data.categories)) { categories = j.data.categories; await Store.clear('categories'); await Store.bulkPut('categories', categories); }
+      if (j.data.state) { state = Object.assign(defaultState(), j.data.state); await saveState(); }
+      UI.toast('بازیابی با موفقیت انجام شد ✅', 'ok');
+      render(curTab);
+    } catch (e) { UI.toast('خطا در بازیابی: ' + e.message, 'bad'); }
+  }
+  async function backupFile(encrypted) {
+    let payload = exportPayload();
+    let name = 'finova-backup-' + jKey(jToday()).replace(/\//g, '-') + '.json';
+    let mime = 'application/json';
+    if (encrypted) {
+      try {
+        const pass = await UI.prompt('رمز پشتیبان', 'یک رمز برای رمزنگاری فایل پشتیبان وارد کنید (حداقل ۶ کاراکتر):', 'password');
+        if (!pass) return;
+        payload = await encryptText(payload, pass);
+        name += '.enc'; mime = 'application/octet-stream';
+      } catch (e) { return UI.toast('خطا در رمزنگاری: ' + e.message, 'bad'); }
+    }
+    const b64 = Charts.bufToB64(new TextEncoder().encode(payload).buffer);
+    await Bridge.saveFile(name, mime, b64);
+    UI.toast('فایل پشتیبان ذخیره شد در Downloads ✅', 'ok');
+  }
+  async function encryptText(text, pass) {
+    const enc = new TextEncoder();
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const keyMat = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']);
+    const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 150000, hash: 'SHA-256' }, keyMat, { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(text));
+    const out = new Uint8Array(16 + 12 + ct.byteLength);
+    out.set(salt); out.set(iv, 16); out.set(new Uint8Array(ct), 28);
+    return 'FENC1:' + btoa(String.fromCharCode(...out));
+  }
+  async function decryptText(payload, pass) {
+    const raw = Uint8Array.from(atob(payload.replace('FENC1:', '')), c => c.charCodeAt(0));
+    const salt = raw.slice(0, 16), iv = raw.slice(16, 28), ct = raw.slice(28);
+    const keyMat = await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveKey']);
+    const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 150000, hash: 'SHA-256' }, keyMat, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+    return new TextDecoder().decode(pt);
+  }
+  async function autoBackup() {
+    if (!state.backup || !state.backup.auto) return;
+    if (Date.now() - (state.backup.lastAt || 0) < 86400000) return;
+    const snap = { id: uid('bk'), at: Date.now(), day: jKey(jToday()), payload: exportPayload() };
+    await Store.put('backups', snap, snap.id);
+    const all = await Store.all('backups');
+    all.sort((a, b) => b.at - a.at);
+    for (const old of all.slice(7)) await Store.del('backups', old.id);
+    state.backup.lastAt = Date.now();
+    await saveState();
+  }
+
+  /* ───────── حالت سختگیرانه ───────── */
+  function strictCheck(amount) {
+    if (!state.strict || !state.strict.enabled) return null;
+    const s = monthStats();
+    const upcoming = txs.filter(t => t.type === 'installment' && t.status === 'pending' && t.dueJdate && daysUntilJ(t.dueJdate) <= 30)
+      .reduce((a, t) => a + t.amount * t.rate, 0);
+    const limit = s.income * (state.strict.pct / 100);
+    const remainAfter = walletBalance() - amount - upcoming;
+    if (amount > limit || remainAfter < 0) {
+      return {
+        amount, limit, upcoming, remainAfter,
+        why: (amount > limit ? `این خرید (${fmtToman(amount)}) از سقف هزینه غیرضروری (${fmtToman(limit)}) بیشتر است.\n` : '') +
+             (remainAfter < 0 ? `اگر این خرید را انجام دهی و اقساط پیش‌رو (${fmtToman(upcoming)}) را بپردازی، موجودی ${fmtToman(remainAfter)} (منفی!) می‌شود.\n` : ''),
+      };
+    }
+    return null;
+  }
+
+  /* ═══════════ رندر صفحات ═══════════ */
+  function render(tab) {
+    curTab = tab;
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    const fab = document.getElementById('fab');
+    fab.classList.toggle('hidden', tab === 'settings');
+    const v = document.getElementById('view');
+    document.getElementById('topTitle').textContent = ({ dashboard: 'فینوا', transactions: 'تراکنش‌ها', installments: 'اقساط', analytics: 'گزارش‌ها', ai: 'دستیار هوشمند', budgets: 'بودجه‌بندی', goals: 'اهداف مالی', challenge: 'چالش پس‌انداز', settings: 'تنظیمات' })[tab] || 'فینوا';
+    if (tab === 'dashboard') v.innerHTML = dashboardHTML();
+    if (tab === 'transactions') v.innerHTML = transactionsHTML();
+    if (tab === 'installments') v.innerHTML = installmentsHTML();
+    if (tab === 'analytics') v.innerHTML = analyticsHTML();
+    if (tab === 'ai') v.innerHTML = aiHTML();
+    if (tab === 'budgets') v.innerHTML = budgetsHTML();
+    if (tab === 'goals') v.innerHTML = goalsHTML();
+    if (tab === 'challenge') v.innerHTML = challengeHTML();
+    if (tab === 'settings') v.innerHTML = settingsHTML();
+    afterRender(tab);
+    window.scrollTo(0, 0);
+  }
+  function afterRender(tab) {
+    if (tab === 'dashboard') {
+      const g = document.getElementById('healthGauge');
+      if (g) Charts.gauge(g, healthScore());
+      const c = document.getElementById('dashTrend');
+      if (c) {
+        const data = [];
+        const now = jToday();
+        for (let i = 5; i >= 0; i--) {
+          const mk = jMonthKey(addJMonths(now, -i));
+          const s = monthStats(mk);
+          data.push({ label: FA_MONTHS[parseJKey(mk).jm - 1].slice(0, 4), in: s.income, out: s.expense + s.installPaid });
+        }
+        Charts.trend(c, data);
+      }
+    }
+    if (tab === 'analytics') renderAnalyticsCharts();
+    if (tab === 'ai') bindAIScreen();
+    if (tab === 'challenge') bindChallenge();
+  }
+
+  /* ── داشبورد ── */
+  function dashboardHTML() {
+    const s = monthStats();
+    const bal = walletBalance();
+    const hs = healthScore();
+    const pend = txs.filter(t => t.type === 'installment' && t.status === 'pending').sort((a, b) => instSort(a) - instSort(b)).slice(0, 4);
+    const overdue = txs.filter(t => t.type === 'installment' && t.status === 'pending' && t.dueJdate && daysUntilJ(t.dueJdate) < 0).length;
+    const rates = lastRates;
+    return `
+    <div class="hero">
+      <div class="hero-label">موجودی کل</div>
+      <div class="hero-amount">${fmtNum(bal)}<span class="cur">تومان</span></div>
+      <div class="hero-row">
+        <div class="hero-chip up"><div class="k">درآمد ${jMonthLabel()}</div><div class="v">${fmtShort(s.income)}</div></div>
+        <div class="hero-chip down"><div class="k">هزینه + قسط</div><div class="v">${fmtShort(s.expense + s.installPaid)}</div></div>
+      </div>
+    </div>
+
+    <div class="card glow">
+      <div class="card-title">❤️ سلامت مالی <span class="lnk" data-go-tab="analytics">جزئیات ›</span></div>
+      <div class="score-wrap">
+        <div id="healthGauge" style="width:130px"></div>
+        <div>
+          <div class="score-num" style="color:${hs >= 75 ? 'var(--ok2)' : hs >= 50 ? 'var(--warn2)' : 'var(--bad2)'}">${faDigits(hs)}<small style="font-size:14px;color:var(--txt3)">/۱۰۰</small></div>
+          <div class="score-lbl">${hs >= 75 ? 'عالی! مسیر درست است' : hs >= 50 ? 'متوسط — قابل بهبود' : 'نیاز به اقدام فوری'}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📅 اقساط پیش‌رو ${overdue ? `<span class="badge red">${faDigits(overdue)} معوق!</span>` : ''} <span class="lnk" data-go-tab="installments">همه ›</span></div>
+      ${pend.length ? `<div class="list">${pend.map(t => {
+        const d = t.dueJdate ? daysUntilJ(t.dueJdate) : 99;
+        const bd = d < 0 ? '<span class="badge red">معوق</span>' : d <= 3 ? '<span class="badge amber">فوری</span>' : '<span class="badge cyan">' + faDigits(d) + ' روز</span>';
+        return `<div class="row-item">
+          <div class="row-ico">${t.title.includes('اجاره') ? '🏠' : '🏦'}</div>
+          <div class="row-main"><div class="t">${esc(t.title)}</div><div class="s">${t.dueJdate ? jDateLabel(t.dueJdate) : '—'} ${t.essential ? '<span class="badge violet">ضروری</span>' : ''}</div></div>
+          <div style="text-align:left"><div class="row-amount amt-pend">${fmtShort(t.amount * t.rate)}</div><div style="margin-top:5px">${bd}</div></div>
+        </div>`;
+      }).join('')}</div>` : '<div class="empty"><div class="big">✅</div>همه اقساط پرداخت شده‌اند</div>'}
+    </div>
+
+    ${rates && (rates.usd || rates.gold18) ? `
+    <div class="card">
+      <div class="card-title">📈 قیمت لحظه‌ای <small style="font-weight:400;color:var(--txt3)">${rates.source || ''}</small></div>
+      <div class="grid2">
+        <div class="rate-card" style="margin:0"><div class="rate-ico gold">🪙</div><div class="rate-main"><div class="t">طلا ۱۸ عیار</div><div class="s">هر گرم</div></div><div class="rate-val"><div class="v">${rates.gold18 ? fmtShort(rates.gold18) : '—'}</div></div></div>
+        <div class="rate-card" style="margin:0"><div class="rate-ico usd">💵</div><div class="rate-main"><div class="t">دلار آمریکا</div><div class="s">آزاد</div></div><div class="rate-val"><div class="v">${rates.usd ? fmtShort(rates.usd) : '—'}</div></div></div>
+      </div>
+    </div>` : ''}
+
+    <div class="card">
+      <div class="card-title">📊 روند ۶ ماه <span class="lnk" data-go-tab="analytics">گزارش کامل ›</span></div>
+      <div class="chart-box" id="dashTrend"></div>
+      <div class="legend"><span><i style="background:var(--ok2)"></i>درآمد</span><span><i style="background:var(--acc)"></i>هزینه و قسط</span></div>
+    </div>`;
+  }
+
+  /* ── تراکنش‌ها ── */
+  let searchQ = '', filterType = 'all', filterCat = 'all', filterFrom = '', filterTo = '';
+  function transactionsHTML() {
+    const list = filteredTxs();
+    return `
+    <div class="card">
+      <div class="field" style="margin:0"><input id="searchInp" placeholder="🔍 جستجو در عنوان، یادداشت، برچسب…" value="${esc(searchQ)}"></div>
+      <div class="chips" style="margin-top:10px">
+        ${['all|همه', 'income|درآمد', 'expense|هزینه', 'installment|قسط'].map(x => { const [k, l] = x.split('|'); return `<button class="chip ${filterType === k ? 'on' : ''}" data-ft="${k}">${l}</button>`; }).join('')}
+      </div>
+      <div class="field-inline" style="margin-top:10px">
+        <div class="field" style="margin:0"><label>از تاریخ</label><input id="fFrom" type="text" placeholder="۱۴۰۳/۰۹/۰۱" value="${esc(filterFrom)}"></div>
+        <div class="field" style="margin:0"><label>تا تاریخ</label><input id="fTo" type="text" placeholder="۱۴۰۳/۰۹/۳۰" value="${esc(filterTo)}"></div>
+      </div>
+      <div class="field" style="margin-top:10px"><label>دسته‌بندی</label>
+        <select id="fCat"><option value="all">همه دسته‌ها</option>${categories.map(c => `<option value="${c.id}" ${filterCat === c.id ? 'selected' : ''}>${c.icon} ${esc(c.name)}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">نتایج (${faDigits(list.length)}) <small style="font-weight:400;color:var(--txt3)">مجموع: ${fmtShort(list.filter(t => t.status === 'paid').reduce((a, t) => a + (t.type === 'income' ? t.amount * t.rate : -(t.amount * t.rate)), 0))} ت</small></div>
+      ${list.length ? `<div class="list">${list.slice(0, 80).map(txRowHTML).join('')}</div>` : '<div class="empty"><div class="big">🔍</div>تراکنشی پیدا نشد</div>'}
+    </div>`;
+  }
+  function filteredTxs() {
+    let l = txs.slice().sort((a, b) => (b.jdate || '').localeCompare(a.jdate || '') || b.createdAt - a.createdAt);
+    const q = enDigits(searchQ).trim().toLowerCase();
+    if (q) l = l.filter(t => (t.title || '').toLowerCase().includes(q) || (t.note || '').toLowerCase().includes(q) || (t.tags || []).some(g => g.toLowerCase().includes(q)) || String(t.amount).includes(q));
+    if (filterType !== 'all') l = l.filter(t => t.type === filterType);
+    if (filterCat !== 'all') l = l.filter(t => t.categoryId === filterCat);
+    if (filterFrom) { const f = enDigits(filterFrom).replace(/[^0-9/]/g, ''); l = l.filter(t => t.jdate >= f); }
+    if (filterTo) { const t2 = enDigits(filterTo).replace(/[^0-9/]/g, ''); l = l.filter(t => t.jdate <= t2); }
+    return l;
+  }
+  function txRowHTML(t) {
+    const cat = categories.find(c => c.id === t.categoryId);
+    const isIn = t.type === 'income';
+    const amtCls = t.status !== 'paid' ? 'amt-pend' : isIn ? 'amt-in' : 'amt-out';
+    const sign = t.status !== 'paid' ? '' : isIn ? '+' : '−';
+    return `<div class="row-item" data-tx="${t.id}">
+      <div class="row-ico" style="background:${cat ? 'color-mix(in srgb,' + cat.color + ',transparent)' : ''}">${cat ? cat.icon : t.type === 'income' ? '💰' : t.type === 'installment' ? '🏦' : '🧾'}</div>
+      <div class="row-main">
+        <div class="t">${esc(t.title)}${t.essential ? ' <span class="badge violet">ضروری</span>' : ''}</div>
+        <div class="s">${jDateLabel(t.jdate)}${cat ? ' • ' + esc(cat.name) : ''}${t.currency !== 'TMN' ? ' • ' + t.currency : ''}${(t.tags || []).map(g => `<span class="tag">#${esc(g)}</span>`).join('')}</div>
+      </div>
+      <div style="text-align:left">
+        <div class="row-amount ${amtCls}">${sign}${fmtShort(t.amount * t.rate)}</div>
+        <div style="margin-top:5px">${t.status === 'pending' ? '<span class="badge amber">در انتظار</span>' : t.status === 'planned' ? '<span class="badge cyan">برنامه‌ریزی</span>' : '<span class="badge green">پرداخت شده</span>'}</div>
+      </div>
+    </div>`;
+  }
+
+  /* ── اقساط ── */
+  let instTab = 'pending';
+  function installmentsHTML() {
+    const mk = jMonthKey(jToday());
+    const all = txs.filter(t => t.type === 'installment');
+    const pending = all.filter(t => t.status === 'pending').sort((a, b) => instSort(a) - instSort(b));
+    const paid = all.filter(t => t.status === 'paid' && t.jdate.startsWith(mk)).sort((a, b) => (b.jdate || '').localeCompare(a.jdate || ''));
+    const rulesActive = rules.filter(r => r.active);
+    return `
+    <div class="subtabs">
+      <button class="chip ${instTab === 'pending' ? 'on' : ''}" data-it="pending">⏳ پرداخت‌نشده (${faDigits(pending.length)})</button>
+      <button class="chip ${instTab === 'paid' ? 'on' : ''}" data-it="paid">✅ پرداخت‌شده (${faDigits(paid.length)})</button>
+      <button class="chip ${instTab === 'rules' ? 'on' : ''}" data-it="rules">🔁 اقساط ماهانه (${faDigits(rulesActive.length)})</button>
+    </div>
+    ${instTab === 'pending' ? (pending.length ? `<div class="list">${pending.map(t => {
+      const d = t.dueJdate ? daysUntilJ(t.dueJdate) : 99;
+      const bd = d < 0 ? '<span class="badge red">معوق ' + faDigits(-d) + ' روز</span>' : d === 0 ? '<span class="badge amber">امروز</span>' : d <= 7 ? '<span class="badge amber">' + faDigits(d) + ' روز دیگر</span>' : '<span class="badge cyan">' + jDateLabel(t.dueJdate) + '</span>';
+      return `<div class="row-item" data-tx="${t.id}">
+        <div class="row-ico">${t.title.includes('اجاره') ? '🏠' : '🏦'}</div>
+        <div class="row-main"><div class="t">${esc(t.title)}</div><div class="s">اولویت ${faDigits(t.priority)} ${t.essential ? '• <span class="badge violet">ضروری</span>' : ''}</div></div>
+        <div style="text-align:left"><div class="row-amount amt-pend">${fmtShort(t.amount * t.rate)}</div><div style="margin-top:5px">${bd}</div></div>
+      </div>`;
+    }).join('')}</div>` : '<div class="empty"><div class="big">🎉</div>قسط پرداخت‌نشده نداری!</div>') : ''}
+    ${instTab === 'paid' ? (paid.length ? `<div class="list">${paid.map(t => `<div class="row-item"><div class="row-ico" style="background:rgba(16,185,129,.12)">✅</div><div class="row-main"><div class="t">${esc(t.title)}</div><div class="s">${jDateLabel(t.jdate)}</div></div><div class="row-amount amt-in">−${fmtShort(t.amount * t.rate)}</div></div>`).join('')}</div>` : '<div class="empty"><div class="big">🗓️</div>این ماه قسطی پرداخت نشده</div>') : ''}
+    ${instTab === 'rules' ? `
+      <button class="btn full" id="addRuleBtn">＋ قسط ماهانه جدید</button>
+      <div style="height:12px"></div>
+      ${rulesActive.length ? `<div class="list">${rulesActive.map(r => `<div class="row-item" data-rule="${r.id}">
+        <div class="row-ico">🔁</div>
+        <div class="row-main"><div class="t">${esc(r.title)}</div><div class="s">هر ماه روز ${faDigits(r.day)} • اولویت ${faDigits(r.priority)}${r.remainingMonths ? ' • ' + faDigits(r.remainingMonths) + ' قسط مانده' : ''}</div></div>
+        <div class="row-amount">${fmtShort(r.amount)}<div style="margin-top:6px"><button class="btn sm ghost" data-stop-rule="${r.id}">توقف</button></div></div>
+      </div>`).join('')}</div>` : '<div class="empty"><div class="big">🔁</div>قسط ماهانه‌ای تعریف نکرده‌ای — با دکمه بالا اجاره و اقساطت را خودکار کن</div>'}` : ''}`;
+  }
+
+  /* ── گزارش‌ها ── */
+  function analyticsHTML() {
+    const now = jToday();
+    const s = monthStats();
+    return `
+    <div class="card glow">
+      <div class="card-title">❤️ امتیاز سلامت مالی</div>
+      <div class="score-wrap"><div id="healthGauge2" style="width:150px"></div>
+        <div style="flex:1">
+          <div class="stat" style="margin-bottom:8px"><div class="k">نرخ پس‌انداز</div><div class="v" style="color:var(--ok2)">${faDigits(s.income ? Math.round((s.income - s.expense - s.installPaid) / s.income * 100) : 0)}٪</div></div>
+          <div class="stat"><div class="k">پوشش اقساط با موجودی</div><div class="v">${s.installPending > 0 ? faDigits(Math.round(walletBalance() / s.installPending * 100)) + '٪' : '✅'}</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">📊 روند ۶ ماهه</div>
+      <div class="chart-box" id="chartTrend"></div>
+      <div class="legend"><span><i style="background:var(--ok2)"></i>درآمد</span><span><i style="background:var(--acc)"></i>هزینه و قسط</span></div>
+    </div>
+    <div class="card">
+      <div class="card-title">🧩 سهم دسته‌ها (${jMonthLabel()})</div>
+      <div class="chart-box" id="chartDonut"></div>
+      <div class="legend" id="donutLegend"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">🔮 پیش‌بینی ۳ ماه آینده</div>
+      <div class="chart-box" id="chartForecast"></div>
+      <div class="legend"><span><i style="background:var(--pri)"></i>برآورد مانده</span><span><i style="background:var(--acc)"></i>پیش‌بینی</span></div>
+      <div id="forecastTable" style="margin-top:10px"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📤 خروجی گزارش</div>
+      <div class="btn-row">
+        <button class="btn" id="pdfBtn">🧾 PDF ماه جاری</button>
+        <button class="btn ghost" id="shareBtn">🖼️ کارت اشتراکی</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn ghost" id="csvBtn">📑 خروجی Excel/CSV</button>
+        <button class="btn ghost" id="shareTextBtn">📋 اشتراک متنی</button>
+      </div>
+    </div>`;
+  }
+  function renderAnalyticsCharts() {
+    const now = jToday();
+    const data = [];
+    for (let i = 5; i >= 0; i--) {
+      const mk = jMonthKey(addJMonths(now, -i));
+      const s = monthStats(mk);
+      data.push({ label: FA_MONTHS[parseJKey(mk).jm - 1].slice(0, 4), in: s.income, out: s.expense + s.installPaid });
+    }
+    Charts.trend(document.getElementById('chartTrend'), data);
+    Charts.gauge(document.getElementById('healthGauge2'), healthScore());
+    // دونات
+    const mk = jMonthKey(now);
+    const byCat = {};
+    txs.filter(t => t.type !== 'income' && t.status === 'paid' && t.jdate.startsWith(mk)).forEach(t => { byCat[t.categoryId] = (byCat[t.categoryId] || 0) + t.amount * t.rate; });
+    const palette = ['#22d3ee', '#d946ef', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16', '#e879f9'];
+    const items = Object.entries(byCat).sort((a, b) => b[1] - a[1]).slice(0, 9).map((e, i) => {
+      const cat = categories.find(c => c.id === e[0]);
+      return { label: cat ? cat.name : 'متفرقه', value: e[1], color: (cat && cat.color) || palette[i] };
+    });
+    Charts.donut(document.getElementById('chartDonut'), items);
+    document.getElementById('donutLegend').innerHTML = items.map(i => `<span><i style="background:${i.color}"></i>${esc(i.label)} — ${fmtShort(i.value)}</span>`).join('');
+    // پیش‌بینی
+    const m1 = monthStats(jMonthKey(addJMonths(now, -1))), m2 = monthStats(jMonthKey(addJMonths(now, -2))), m3 = monthStats(jMonthKey(addJMonths(now, -3)));
+    const avgOut = (m1.expense + m1.installPaid + m2.expense + m2.installPaid + m3.expense + m3.installPaid) / 3;
+    const avgIn = (m1.income + m2.income + m3.income) / 3;
+    const upcomingInst = txs.filter(t => t.type === 'installment' && t.status === 'pending').reduce((a, t) => a + t.amount * t.rate, 0);
+    let bal = walletBalance();
+    const fData = [{ label: 'اکنون', value: bal }];
+    const rows = [];
+    for (let i = 1; i <= 3; i++) {
+      const inst = i === 1 ? Math.min(upcomingInst, upcomingInst) : upcomingInst * 0.6;
+      const net = avgIn - avgOut - (i === 1 ? upcomingInst : 0);
+      bal += net;
+      const mk = addJMonths(now, i);
+      fData.push({ label: FA_MONTHS[mk.jm - 1].slice(0, 4), value: Math.round(bal), projected: true });
+      rows.push({ month: jMonthLabel(jMonthKey(mk)), in: avgIn, out: avgOut + (i === 1 ? upcomingInst : 0), bal: Math.round(bal) });
+    }
+    Charts.forecast(document.getElementById('chartForecast'), fData);
+    document.getElementById('forecastTable').innerHTML = `<table class="tbl"><tr><th>ماه</th><th>ورودی</th><th>خروجی</th><th>مانده</th></tr>${rows.map(r => `<tr><td>${r.month}</td><td>${fmtShort(r.in)}</td><td>${fmtShort(r.out)}</td><td style="color:${r.bal >= 0 ? 'var(--ok2)' : 'var(--bad2)'}">${fmtShort(r.bal)}</td></tr>`).join('')}</table>`;
+  }
+
+  /* ── AI ── */
+  let aiTab = 'offline';
+  function aiHTML() {
+    const r = lastRates;
+    const cfg = AI.aiConfig();
+    return `
+    <div class="subtabs">
+      <button class="chip ${aiTab === 'offline' ? 'on' : ''}" data-ait="offline">🤖 دستیار آفلاین</button>
+      <button class="chip ${aiTab === 'online' ? 'on' : ''}" data-ait="online">🌐 هوش مصنوعی آنلاین</button>
+      <button class="chip ${aiTab === 'invest' ? 'on' : ''}" data-ait="invest">📈 تحلیل سرمایه‌گذاری</button>
+    </div>
+    ${aiTab === 'offline' ? `
+      <div class="card">
+        <div class="card-title">دستیار مالی آفلاین <span class="ai-badge on">بدون اینترنت</span></div>
+        <div class="chips" style="margin-bottom:12px">
+          ${['اقساطم را چطور مدیریت کنم؟', 'چطور پس‌انداز کنم؟', 'بودجه‌ام چطوره؟', 'وضعیت مالی من؟', 'سرمایه‌گذاری چی بخرم؟'].map(q => `<button class="chip" data-q="${esc(q)}">${q}</button>`).join('')}
+        </div>
+        <div class="field"><input id="aiInp" placeholder="سؤال مالی خود را بپرسید…"></div>
+        <button class="btn full" id="aiAskBtn">پرسیدن از دستیار</button>
+      </div>
+      <div id="aiOut"></div>` : ''}
+    ${aiTab === 'online' ? `
+      <div class="card">
+        <div class="card-title">هوش مصنوعی آنلاین <span class="ai-badge ${cfg.apiKey ? 'on' : 'off'}">${cfg.apiKey ? 'متصل' : 'کلید تنظیم نشده'}</span></div>
+        <p style="font-size:12px;color:var(--txt2);line-height:1.9;margin:0 0 12px">تمام داده‌های مالی تو (اقساط، بودجه، اهداف، موجودی و قیمت لحظه‌ای) برای تحلیل به مدل هوش مصنوعی ارسال می‌شود و تحلیل کامل و شخصی‌سازی‌شده می‌گیری. کلید API در <b data-go-tab="settings">تنظیمات</b> قابل تنظیم است.</p>
+        <div class="chips" style="margin-bottom:12px">
+          ${['کدام قسط مهم‌تر است و چرا؟', 'چقدر می‌توانم پس‌انداز کنم و چطور؟', 'با موجودی من چه چیزی بخرم؟', 'برنامه مالی یک‌ماهه برایم بساز'].map(q => `<button class="chip" data-qo="${esc(q)}">${q}</button>`).join('')}
+        </div>
+        <div class="field"><input id="aiOnInp" placeholder="هر سؤالی درباره وضعیت مالی‌ات بپرس…"></div>
+        <button class="btn full" id="aiOnBtn">🌐 تحلیل آنلاین</button>
+      </div>
+      <div id="aiOnOut"></div>` : ''}
+    ${aiTab === 'invest' ? `
+      <div class="card glow">
+        <div class="card-title">💰 قیمت لحظه‌ای ${r && r.ts ? `<small style="font-weight:400;color:var(--txt3)">${r.source || ''} ${r.stale ? '• کش قدیمی' : ''}</small>` : ''}</div>
+        <div class="rate-card"><div class="rate-ico gold">🪙</div><div class="rate-main"><div class="t">طلا ۱۸ عیار</div><div class="s">هر گرم • بازار تهران</div></div><div class="rate-val"><div class="v">${r && r.gold18 ? fmtNum(r.gold18) : '—'}</div></div></div>
+        <div class="rate-card"><div class="rate-ico gold">🪙</div><div class="rate-main"><div class="t">سکه تمام</div><div class="s">امامی</div></div><div class="rate-val"><div class="v">${r && r.goldCoin ? fmtNum(r.goldCoin) : '—'}</div></div></div>
+        <div class="rate-card" style="margin-bottom:0"><div class="rate-ico usd">💵</div><div class="rate-main"><div class="t">دلار آمریکا</div><div class="s">بازار آزاد</div></div><div class="rate-val"><div class="v">${r && r.usd ? fmtNum(r.usd) : '—'}</div></div></div>
+        <button class="btn ghost full" id="refreshRates" style="margin-top:12px">🔄 بروزرسانی قیمت‌ها</button>
+      </div>
+      <div class="card">
+        <div class="card-title">📊 روند ۳۰ روز اخیر</div>
+        <div class="chart-box" id="rateChart"></div>
+        <div class="legend"><span><i style="background:var(--gold)"></i>طلا ۱۸</span><span><i style="background:var(--usd)"></i>دلار</span></div>
+      </div>
+      <div class="card">
+        <div class="card-title">🧮 تحلیل سریع: طلا یا دلار؟</div>
+        <div id="quickInvest"></div>
+        <button class="btn full" id="investAIBtn">🤖 تحلیل هوشمند با هوش مصنوعی آنلاین</button>
+      </div>
+      <div id="aiInvestOut"></div>` : ''}`;
+  }
+  function bindAIScreen() {
+    if (aiTab === 'offline') {
+      const out = document.getElementById('aiOut');
+      document.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { document.getElementById('aiInp').value = b.dataset.q; askOffline(); });
+      document.getElementById('aiAskBtn').onclick = askOffline;
+      document.getElementById('aiInp').onkeydown = e => { if (e.key === 'Enter') askOffline(); };
+      function askOffline() {
+        const q = document.getElementById('aiInp').value.trim();
+        if (!q) return UI.toast('سؤال خود را بنویس', 'warn');
+        out.innerHTML = `<div class="ai-bubble user">${esc(q)}</div><div class="ai-think">دستیار فینوا در حال تحلیل <span class="dots-anim"><span>•</span><span>•</span><span>•</span></span></div>`;
+        setTimeout(() => { out.innerHTML += `<div class="ai-bubble">${mdLite(AI.offlineAnswer(q))}</div>`; out.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, 500);
+      }
+    }
+    if (aiTab === 'online') {
+      const out = document.getElementById('aiOnOut');
+      document.querySelectorAll('[data-qo]').forEach(b => b.onclick = () => { document.getElementById('aiOnInp').value = b.dataset.qo; askOnline(); });
+      document.getElementById('aiOnBtn').onclick = askOnline;
+      document.getElementById('aiOnInp').onkeydown = e => { if (e.key === 'Enter') askOnline(); };
+      async function askOnline() {
+        const q = document.getElementById('aiOnInp').value.trim() || 'وضعیت مالی من را کامل تحلیل کن و پیشنهاد بده';
+        out.innerHTML = `<div class="ai-bubble user">${esc(q)}</div><div class="ai-think" id="thinkRow">🧠 آماده‌سازی داده‌ها <span class="dots-anim"><span>•</span><span>•</span><span>•</span></span></div>`;
+        out.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        try {
+          const ans = await AI.onlineAnswer(q, s => { const t = document.getElementById('thinkRow'); if (t) t.innerHTML = '⏳ ' + s + ' <span class="dots-anim"><span>•</span><span>•</span><span>•</span></span>'; });
+          out.innerHTML = out.innerHTML.replace(/<div class="ai-think".*?<\/div>/s, '') + `<div class="ai-bubble">${mdLite(ans)}</div><div class="btn-row"><button class="btn ghost sm" id="copyAns">📋 کپی پاسخ</button></div>`;
+          document.getElementById('copyAns').onclick = () => { navigator.clipboard && navigator.clipboard.writeText(ans); UI.toast('کپی شد', 'ok'); };
+        } catch (e) {
+          out.innerHTML = out.innerHTML.replace(/<div class="ai-think".*?<\/div>/s, '') + `<div class="ai-bubble" style="border-color:var(--bad)">❌ ${esc(e.message)}</div>`;
+        }
+        out.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+    }
+    if (aiTab === 'invest') {
+      drawRateHistory();
+      quickInvest();
+      document.getElementById('refreshRates').onclick = async (e) => {
+        const btn = e.target; btn.textContent = '⏳ در حال دریافت…';
+        lastRates = await AI.fetchRates(); App.lastRates = lastRates;
+        render('ai');
+      };
+      document.getElementById('investAIBtn').onclick = async () => {
+        const out = document.getElementById('aiInvestOut');
+        out.innerHTML = `<div class="ai-think">🧠 تحلیل طلا و دلار <span class="dots-anim"><span>•</span><span>•</span><span>•</span></span></div>`;
+        out.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        try {
+          const ans = await AI.onlineAnswer('با توجه به قیمت لحظه‌ای طلا و دلار و روند ۳۰ روزه و موجودی و پس‌انداز من، کدام برای نگهداری ارزش پول من بهتر است؟ طلا بخرم یا دلار؟ تحلیل کامل سود/ریسک با اعداد بده و مقدار پیشنهادی را هم بگو.');
+          out.innerHTML = `<div class="ai-bubble">${mdLite(ans)}</div>`;
+        } catch (e) { out.innerHTML = `<div class="ai-bubble" style="border-color:var(--bad)">❌ ${esc(e.message)}</div>`; }
+        out.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      };
+    }
+  }
+  async function drawRateHistory() {
+    const hist = await AI.rateHistory();
+    const el = document.getElementById('rateChart');
+    if (!el) return;
+    if (hist.length < 2) { el.innerHTML = '<div class="empty">با هر بار باز کردن اپ، قیمت‌ها ذخیره می‌شوند و روند اینجا نمایش داده می‌شود 📈</div>'; return; }
+    const W = Math.min(el.clientWidth || 340, 800), H = 190;
+    const dpr = window.devicePixelRatio || 1;
+    const c = document.createElement('canvas'); c.width = W * dpr; c.height = H * dpr; c.style.height = H + 'px';
+    const ctx = c.getContext('2d'); ctx.scale(dpr, dpr);
+    const pad = { t: 16, b: 24, l: 6, r: 6 };
+    const series = [
+      { key: 'gold18', color: cssv('--gold') },
+      { key: 'usd', color: cssv('--usd') },
+    ];
+    series.forEach(s => {
+      const vals = hist.map(h => h[s.key]).filter(v => v > 0);
+      if (vals.length < 2) return;
+      const maxV = Math.max(...vals) * 1.05, minV = Math.min(...vals) * 0.95;
+      const pts = hist.map((h, i) => h[s.key] > 0 ? {
+        x: pad.l + (W - pad.l - pad.r) * (i / (hist.length - 1)),
+        y: pad.t + (H - pad.t - pad.b) * (1 - (h[s.key] - minV) / (maxV - minV)),
+      } : null).filter(Boolean);
+      if (pts.length < 2) return;
+      Charts.trend ? null : null;
+      ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.beginPath();
+      pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
+      pts.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, 7); ctx.fillStyle = s.color; ctx.fill(); });
+    });
+    ctx.fillStyle = cssv('--txt3'); ctx.font = '9px Vazirmatn,Tahoma';
+    ctx.textAlign = 'center';
+    [0, Math.floor(hist.length / 2), hist.length - 1].forEach(i => {
+      if (hist[i]) ctx.fillText(faDigits(hist[i].day.split('/')[1] + '/' + hist[i].day.split('/')[2]), pad.l + (W - pad.l - pad.r) * (i / (hist.length - 1)), H - 6);
+    });
+    el.innerHTML = ''; el.appendChild(c);
+  }
+  function cssv(v) { return getComputedStyle(document.body).getPropertyValue(v).trim(); }
+  function quickInvest() {
+    const el = document.getElementById('quickInvest');
+    if (!el) return;
+    const r = lastRates;
+    if (!r || !r.usd || !r.gold18) { el.innerHTML = '<div class="empty">ابتدا قیمت‌ها را بروزرسانی کنید 🔄</div>'; return; }
+    const bal = walletBalance();
+    const investable = Math.max(0, bal - txs.filter(t => t.type === 'installment' && t.status === 'pending').reduce((a, t) => a + t.amount * t.rate, 0));
+    const goldGr = Math.floor(investable / r.gold18 * 100) / 100;
+    const usdN = Math.floor(investable / r.usd * 10) / 10;
+    const hist = AI.rateHistory ? null : null;
+    el.innerHTML = `
+      <div class="grid2" style="margin-bottom:12px">
+        <div class="stat"><div class="k">قابل سرمایه‌گذاری</div><div class="v">${fmtShort(investable)} ت</div><div class="sub">بعد از کسر اقساط</div></div>
+        <div class="stat"><div class="k">قدرت خرید</div><div class="v">${faDigits(goldGr)} گرم طلا</div><div class="sub">یا ${faDigits(usdN)} دلار</div></div>
+      </div>
+      <p style="font-size:12.5px;color:var(--txt2);line-height:2;margin:0">
+      • طلا ۱۸ عیار: <b style="color:var(--gold)">${fmtToman(r.gold18)}</b> — تاریخی‌ترین سپر تورم در ایران، نقدشوندگی بالا در صرافی‌ها.<br>
+      • دلار: <b style="color:var(--usd)">${fmtToman(r.usd)}</b> — نوسان سیاسی/اخباری شدیدتر، ریسک مقرراتی بیشتر.<br>
+      • راهبرد پیشنهادی: تقسیم گام‌به‌گام (مثلاً ۷۰٪ طلا / ۳۰٪ دلار در ۳ مرحله) و پرهیز از خرید یکجایی در قله قیمت.
+      </p>`;
+  }
+
+  /* ── بودجه ── */
+  function budgetsHTML() {
+    const mk = jMonthKey(jToday());
+    const bs = budgets.filter(b => b.jmonth === mk);
+    const spentByCat = {};
+    txs.filter(t => t.type === 'expense' && t.status === 'paid' && t.jdate.startsWith(mk)).forEach(t => { spentByCat[t.categoryId] = (spentByCat[t.categoryId] || 0) + t.amount * t.rate; });
+    const totalLimit = bs.reduce((a, b) => a + b.limit, 0);
+    const totalSpent = bs.reduce((a, b) => a + (spentByCat[b.categoryId] || 0), 0);
+    const expCats = categories.filter(c => c.type !== 'income');
+    return `
+    <div class="card glow">
+      <div class="card-title">بودجه ${jMonthLabel()}</div>
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:8px"><span>خرج‌شده: <b style="color:var(--bad2)">${fmtShort(totalSpent)}</b></span><span>سقف کل: <b>${fmtShort(totalLimit)}</b></span></div>
+      <div class="pbar ${totalSpent > totalLimit ? 'bad' : totalSpent > totalLimit * 0.8 ? 'warn' : 'ok'}"><div style="width:${totalLimit ? Math.min(100, totalSpent / totalLimit * 100) : 0}%"></div></div>
+      ${totalSpent > totalLimit ? `<p style="color:var(--bad2);font-size:12px;margin:10px 0 0">🚨 ${fmtShort(totalSpent - totalLimit)} تومان از بودجه عبور کرده‌ای!</p>` : ''}
+    </div>
+    <button class="btn full" id="addBudgetBtn">＋ تعیین بودجه برای دسته</button>
+    <div style="height:12px"></div>
+    ${bs.length ? `<div class="list">${bs.map(b => {
+      const cat = categories.find(c => c.id === b.categoryId);
+      const spent = spentByCat[b.categoryId] || 0;
+      const pct = b.limit ? Math.round(spent / b.limit * 100) : 0;
+      return `<div class="card" style="margin-bottom:10px;padding:13px 15px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px">
+          <div style="display:flex;gap:9px;align-items:center"><span style="font-size:19px">${cat ? cat.icon : '🧾'}</span><b style="font-size:13.5px">${cat ? esc(cat.name) : 'دسته'}</b></div>
+          <div style="display:flex;gap:6px;align-items:center"><span style="font-size:12px;color:${pct > 100 ? 'var(--bad2)' : 'var(--txt2)'}">${fmtShort(spent)} / ${fmtShort(b.limit)}</span><button class="btn sm ghost" data-del-budget="${b.id}">🗑</button></div>
+        </div>
+        <div class="pbar ${pct > 100 ? 'bad' : pct > 80 ? 'warn' : 'ok'}"><div style="width:${Math.min(100, pct)}%"></div></div>
+        <div style="font-size:10.5px;color:var(--txt3);margin-top:5px">${pct > 100 ? '🚨 ' + faDigits(pct - 100) + '٪ بیشتر از سقف' : faDigits(pct) + '٪ استفاده شده • باقی: ' + fmtShort(Math.max(0, b.limit - spent))}</div>
+      </div>`;
+    }).join('')}</div>` : '<div class="empty"><div class="big">🎯</div>برای این ماه بودجه تعیین نکرده‌ای.<br>سقف خرج برای هر دسته بگذار تا کنترل داشته باشی.</div>'}`;
+  }
+
+  /* ── اهداف + بدهی ── */
+  function goalsHTML() {
+    const debts = rules.filter(r => r.active && r.amount > 0);
+    return `
+    <button class="btn full" id="addGoalBtn">＋ هدف مالی جدید</button>
+    <div style="height:12px"></div>
+    ${goals.length ? goals.map(g => {
+      const pct = g.target ? Math.round(g.saved / g.target * 100) : 0;
+      const months = g.deadlineJ ? Math.max(1, Math.ceil(daysUntilJ(g.deadlineJ) / 30)) : 6;
+      const perMonth = Math.ceil(Math.max(0, g.target - g.saved) / months);
+      return `<div class="card" style="padding:15px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px">
+          <b style="font-size:14px">${esc(g.title)}</b>
+          <div style="display:flex;gap:6px"><button class="btn sm" data-goal-add="${g.id}">＋ پس‌انداز</button><button class="btn sm ghost" data-del-goal="${g.id}">🗑</button></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:7px">
+          <span>${fmtShort(g.saved)} از ${fmtShort(g.target)} تومان</span><span style="color:${pct >= 100 ? 'var(--ok2)' : 'var(--pri2)'};font-weight:800">${faDigits(pct)}٪</span>
+        </div>
+        <div class="pbar ${pct >= 100 ? 'ok' : ''}"><div style="width:${Math.min(100, pct)}%"></div></div>
+        <div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap">
+          ${[25, 50, 75, 100].map(m => `<span class="badge ${pct >= m ? 'green' : ''}" style="opacity:${pct >= m ? 1 : .45}">milestone ${faDigits(m)}٪ ${pct >= m ? '✓' : ''}</span>`).join('')}
+        </div>
+        ${pct < 100 ? `<p style="font-size:11.5px;color:var(--txt2);margin:9px 0 0">💡 ماهی <b>${fmtToman(perMonth)}</b> کنار بگذاری تا ${g.deadlineJ ? jDateLabel(g.deadlineJ) : faDigits(months) + ' ماه بعد'} به هدف می‌رسی.</p>` : '<p style="font-size:12px;color:var(--ok2);margin:9px 0 0">🎉 تبریک! هدف محقق شد!</p>'}
+      </div>`;
+    }).join('') : '<div class="empty"><div class="big">🏆</div>هدفی ثبت نشده — اولین هدف مالی‌ات را بساز</div>'}
+
+    <div class="sec-label">❄️🏹 راهبرد بدهی: برفی vs بهمنی</div>
+    <div class="card">
+      ${debts.length ? debtStrategyHTML(debts) : '<div class="empty">بدهی فعالی (قسط ماهانه) نداری 🎉</div>'}
+    </div>`;
+  }
+  function debtStrategyHTML(debts) {
+    const surplus = monthStats().income ? Math.max(0, monthStats().income - monthStats().expense - monthStats().installPaid) : Math.round(walletBalance() * 0.1);
+    const snow = debts.map(d => ({ ...d, amount: d.amount })).sort((a, b) => a.amount - b.amount);
+    const aval = debts.slice().sort((a, b) => b.amount - a.amount);
+    const totalDebt = debts.reduce((a, d) => a + d.amount, 0);
+    const monthsSnow = Math.max(...debts.map(d => d.remainingMonths || 12));
+    const monthsAval = monthsSnow; // بدون نرخ بهره، ترتیب اثر یکسان دارد؛ نمایش تحلیلی
+    return `
+      <p style="font-size:12px;color:var(--txt2);line-height:1.9;margin:0 0 12px">مجموع اقساط ماهانه فعال: <b>${fmtToman(debts.reduce((a, d) => a + d.amount, 0))}</b> • مازاد ماهانه برآوردی: <b style="color:var(--ok2)">${fmtToman(surplus)}</b></p>
+      <div class="grid2">
+        <div class="strategy-col ${surplus > totalDebt ? 'best' : ''}">
+          <h4>❄️ برفی (Snowball)</h4>
+          <p style="font-size:11.5px;color:var(--txt2);line-height:1.8;margin:0">کوچک‌ترین بدهی اول کامل تسویه → انگیزه روانی بالا<br><b>ترتیب:</b> ${snow.map(d => esc(d.title)).join(' → ')}</p>
+        </div>
+        <div class="strategy-col">
+          <h4>🏹 بهمنی (Avalanche)</h4>
+          <p style="font-size:11.5px;color:var(--txt2);line-height:1.8;margin:0">گران‌ترین/بزرگ‌ترین بدهی اول → حداقل کارمزد در بلندمدت<br><b>ترتیب:</b> ${aval.map(d => esc(d.title)).join(' → ')}</p>
+        </div>
+      </div>
+      <p style="font-size:11.5px;color:var(--txt3);margin:12px 0 0">💡 اگر بدهی‌ها کارمزد/جریمه متفاوت دارند، روش بهمنی کمتر هزینه می‌دهد؛ اگر نیاز به انگیزه داری، روش برفی بهتر جواب می‌دهد. با مازاد ماهانه ${fmtShort(surplus)} ت، می‌توانی هر ماه یک قسط اضافه به بدهی هدف بپردازی.</p>`;
+  }
+
+  /* ── چالش ۳۰ روزه ── */
+  function challengeHTML() {
+    const ch = state.challenge || {};
+    const today = jKey(jToday());
+    const active = ch.active && ch.startedJ;
+    let day = 0, saved = 0, streak = 0;
+    if (active) {
+      day = Math.min(30, Math.floor((new Date() - Jalali.toGregorian(parseJKey(ch.startedJ).jy, parseJKey(ch.startedJ).jm, parseJKey(ch.startedJ).jd)) / 86400000) + 1);
+      const log = ch.log || {};
+      saved = Object.values(log).reduce((a, b) => a + (+b || 0), 0);
+      for (let i = 0; i < 30; i++) { if (log[jKey(jAddDays(-i))]) streak++; else if (i > 0) break; }
+    }
+    const target = 30 * (ch.daily || 50000);
+    return `
+    <div class="card glow">
+      <div class="card-title">🔥 چالش ۳۰ روزه پس‌انداز</div>
+      ${active ? `
+        <div style="text-align:center;margin:6px 0 14px">
+          <div style="font-size:34px;font-weight:900;color:var(--pri2)">روز ${faDigits(day)} از ۳۰</div>
+          <div class="score-lbl">پشت‌سرهم: ${faDigits(streak)} روز • مجموع: ${fmtToman(saved)} از ${fmtShort(target)}</div>
+        </div>
+        <div class="pbar ok"><div style="width:${Math.min(100, saved / target * 100)}%"></div></div>
+        <div class="btn-row">
+          <button class="btn ok" id="checkinBtn">✅ ثبت پس‌انداز امروز (${fmtShort(ch.daily || 50000)})</button>
+          <button class="btn ghost" id="endChBtn">پایان چالش</button>
+        </div>` : `
+        <p style="font-size:12.5px;color:var(--txt2);line-height:2">هر روز مبلغی ثابت پس‌انداز کن و اینجا ثبت کن. ۳۰ روز پیوسته = عادت طلایی! مبلغ روزانه را تعیین کن:</p>
+        <div class="field"><label>مبلغ روزانه (تومان)</label><input id="chDaily" type="number" value="50000"></div>
+        <button class="btn full" id="startChBtn">🚀 شروع چالش</button>`}
+    </div>`;
+  }
+  function bindChallenge() {
+    const start = document.getElementById('startChBtn');
+    if (start) start.onclick = async () => {
+      const daily = +document.getElementById('chDaily').value || 50000;
+      state.challenge = { active: true, startedJ: jKey(jToday()), daily, log: {} };
+      await saveState(); UI.toast('چالش شروع شد! 🔥', 'ok'); render('challenge');
+    };
+    const checkin = document.getElementById('checkinBtn');
+    if (checkin) checkin.onclick = async () => {
+      const ch = state.challenge;
+      ch.log = ch.log || {};
+      const today = jKey(jToday());
+      if (ch.log[today]) return UI.toast('امروز قبلاً ثبت کرده‌ای ✅', 'warn');
+      ch.log[today] = ch.daily;
+      // ثبت تراکنش پس‌انداز
+      txs.push(normTx({ type: 'expense', title: 'پس‌انداز چالش ۳۰ روزه', amount: ch.daily, categoryId: null, essential: false, tags: ['چالش'], status: 'paid' }));
+      await persist('transactions');
+      const saved = Object.values(ch.log).reduce((a, b) => a + b, 0);
+      if (Object.keys(ch.log).length >= 30) { UI.toast('🎉 چالش کامل شد! مجموع: ' + fmtToman(saved), 'ok'); Bridge.showNotification('🏆 فینوا', 'چالش ۳۰ روزه را کامل کردی! آفرین!', 7777, 'chDone'); }
+      else UI.toast('ثبت شد! ادامه بده 🔥', 'ok');
+      await saveState(); render('challenge');
+    };
+    const end = document.getElementById('endChBtn');
+    if (end) end.onclick = async () => { state.challenge = {}; await saveState(); render('challenge'); };
+  }
+
+  /* ── تنظیمات ── */
+  function settingsHTML() {
+    const cfg = AI.aiConfig();
+    return `
+    <div class="card">
+      <div class="card-title">🔐 قفل و امنیت</div>
+      <div class="switch-row"><span>قفل با رمز (PIN ۴ رقمی)</span><label class="switch"><input type="checkbox" id="swLock" ${state.lock && state.lock.enabled ? 'checked' : ''}><span class="sw"></span></label></div>
+      <div class="switch-row"><span>حالت سختگیرانه (هشدار قبل از خرید غیرضروری)</span><label class="switch"><input type="checkbox" id="swStrict" ${state.strict && state.strict.enabled ? 'checked' : ''}><span class="sw"></span></label></div>
+      ${state.strict && state.strict.enabled ? `<div class="field" style="margin-top:8px"><label>سقف خرید غیرضروری (٪ درآمد ماه): ${faDigits(state.strict.pct)}</label><input type="range" id="strictPct" min="5" max="60" step="5" value="${state.strict.pct}" style="width:100%"></div>` : ''}
+    </div>
+    <div class="card">
+      <div class="card-title">🔔 یادآوری‌ها</div>
+      <div class="field"><label>یادآوری قسط چند روز قبل؟</label>
+        <div class="chips">
+          ${[7, 3, 1].map(d => `<button class="chip ${((state.notify && state.notify.days) || []).includes(d) ? 'on' : ''}" data-nday="${d}">${faDigits(d)} روز قبل</button>`).join('')}
+        </div></div>
+      <div class="switch-row"><span>هشدار اتمام بودجه</span><label class="switch"><input type="checkbox" id="swBudgetAlert" ${state.notify && state.notify.budgetAlert ? 'checked' : ''}><span class="sw"></span></label></div>
+      <button class="btn ghost full" id="testNotifBtn">🔔 تست اعلان سیستم</button>
+    </div>
+    <div class="card">
+      <div class="card-title">🌐 هوش مصنوعی آنلاین</div>
+      <div class="field"><label>آدرس سرویس (OpenAI-compatible)</label>
+        <input id="aiBase" dir="ltr" value="${esc(cfg.baseURL)}" placeholder="https://api.openai.com/v1">
+        <div class="hint">مثال: https://api.openai.com/v1 یا https://openrouter.ai/api/v1 یا یک سرور محلی LLM</div>
+      </div>
+      <div class="field"><label>کلید API</label><input id="aiKey" dir="ltr" type="password" value="${esc(cfg.apiKey)}" placeholder="sk-..."></div>
+      <div class="field"><label>نام مدل</label><input id="aiModel" dir="ltr" value="${esc(cfg.model)}" placeholder="gpt-4o-mini"></div>
+      <button class="btn full" id="saveAIBtn">ذخیره تنظیمات AI</button>
+    </div>
+    <div class="card">
+      <div class="card-title">💱 قیمت دستی (اگر API در دسترس نبود)</div>
+      <div class="field-inline">
+        <div class="field"><label>دلار (تومان)</label><input id="mUSD" type="number" value="${esc(state.manualUSD || '')}"></div>
+        <div class="field"><label>طلا ۱۸ (تومان)</label><input id="mGold" type="number" value="${esc(state.manualGold || '')}"></div>
+      </div>
+      <button class="btn ghost full" id="saveRatesBtn">ذخیره قیمت‌های دستی</button>
+    </div>
+    <div class="card">
+      <div class="card-title">💾 داده و پشتیبان</div>
+      <div class="switch-row"><span>پشتیبان‌گیری خودکار روزانه</span><label class="switch"><input type="checkbox" id="swAutoBk" ${state.backup && state.backup.auto ? 'checked' : ''}><span class="sw"></span></label></div>
+      <div class="btn-row"><button class="btn" id="bkEncBtn">🔐 پشتیبان رمزنگاری‌شده</button><button class="btn ghost" id="bkPlainBtn">📤 پشتیبان ساده</button></div>
+      <div class="btn-row"><button class="btn ghost" id="restoreBtn">📥 بازیابی از فایل</button><button class="btn ghost" id="exportDataBtn">📋 نمایش داده JSON</button></div>
+      <div class="btn-row"><button class="btn danger" id="wipeBtn">🗑 پاک‌سازی کامل داده‌ها</button></div>
+      <p class="hint" style="text-align:center;margin-top:8px">پاک‌سازی، همه دیتابیس (IndexedDB و حافظه‌های قبلی) را واقعاً حذف می‌کند.</p>
+    </div>
+    <div class="card">
+      <div class="card-title">🏷️ دسته‌ها و کیف پول‌ها</div>
+      <div class="btn-row"><button class="btn ghost" id="addCatBtn">＋ دسته جدید</button><button class="btn ghost" id="addWalletBtn">＋ کیف پول جدید</button></div>
+      <div class="list" style="margin-top:10px">${categories.map(c => `<div class="row-item"><div class="row-ico">${c.icon}</div><div class="row-main"><div class="t">${esc(c.name)}</div><div class="s">${c.type === 'income' ? 'درآمد' : c.essential ? 'هزینه ضروری' : 'هزینه'} </div></div></div>`).join('')}</div>
+    </div>
+    <div class="card">
+      <div class="card-title">ℹ️ درباره فینوا</div>
+      <p style="font-size:12.5px;color:var(--txt2);line-height:2;margin:0">فینوا نسخه ${esc(Bridge.version())} — مدیریت مالی هوشمند، کاملاً آفلاین و محلی.<br>داده‌هایت فقط روی همین گوشی ذخیره می‌شوند. 🔒<br>تقویم جلالی • تومان • RTL کامل</p>
+    </div>`;
+  }
+
+  /* ═══ تعاملات عمومی ═══ */
+  function bindChrome() {
+    document.querySelectorAll('.nav-btn').forEach(b => b.onclick = () => render(b.dataset.tab));
+    document.getElementById('themeBtn').onclick = async () => { state.dark = !state.dark; applyTheme(); await saveState(); render(curTab); };
+    document.getElementById('menuBtn').onclick = () => document.getElementById('menuSheet').classList.remove('hidden');
+    document.getElementById('menuSheet').addEventListener('click', e => {
+      if (e.target.classList.contains('sheet-backdrop') || e.target.classList.contains('sheet-cancel')) document.getElementById('menuSheet').classList.add('hidden');
+      const go = e.target.closest('[data-go]');
+      if (go) { document.getElementById('menuSheet').classList.add('hidden'); render(go.dataset.go); }
+    });
+    document.getElementById('fab').onclick = showAddSheet;
+    document.getElementById('view').addEventListener('click', viewClickHandler);
+    document.getElementById('view').addEventListener('input', viewInputHandler);
+    document.getElementById('view').addEventListener('change', viewChangeHandler);
+    window.__backHandler = () => {
+      const open = document.querySelector('.modal-backdrop, .sheet-backdrop:not(.hidden)');
+      if (open) { if (!open.classList.contains('hidden')) open.classList.add('hidden'); else open.remove(); }
+      else if (curTab !== 'dashboard') render('dashboard');
+      else Bridge.exitApp();
+    };
+  }
+  function applyTheme() {
+    document.body.classList.toggle('light', !state.dark);
+    document.querySelector('meta[name=theme-color]').setAttribute('content', state.dark ? '#0b1120' : '#eef2f9');
+    document.getElementById('themeBtn').textContent = state.dark ? '🌙' : '☀️';
+  }
+  function viewClickHandler(e) {
+    const t = e.target;
+    // ناوبری‌ها
+    const goTab = t.closest('[data-go-tab]'); if (goTab) return render(goTab.dataset.goTab);
+    const it = t.closest('[data-it]'); if (it) { instTab = it.dataset.it; return render('installments'); }
+    const ait = t.closest('[data-ait]'); if (ait) { aiTab = ait.dataset.ait; return render('ai'); }
+    const ft = t.closest('[data-ft]'); if (ft) { filterType = ft.dataset.ft; return render('transactions'); }
+    // تراکنش
+    const tx = t.closest('[data-tx]'); if (tx) return txModal(txs.find(x => x.id === tx.dataset.tx));
+    // قسط ماهانه
+    const stopRule = t.closest('[data-stop-rule]'); if (stopRule) return stopRuleConfirm(stopRule.dataset.stopRule);
+    const addRule = t.closest('#addRuleBtn'); if (addRule) return ruleForm();
+    // بودجه
+    const addB = t.closest('#addBudgetBtn'); if (addB) return budgetForm();
+    const delB = t.closest('[data-del-budget]'); if (delB) { budgets = budgets.filter(b => b.id !== delB.dataset.delBudget); persist('budgets'); UI.toast('بودجه حذف شد', 'ok'); return render('budgets'); }
+    // هدف
+    const addG = t.closest('#addGoalBtn'); if (addG) return goalForm();
+    const delG = t.closest('[data-del-goal]'); if (delG) { goals = goals.filter(g => g.id !== delG.dataset.delGoal); persist('goals'); return render('goals'); }
+    const addGs = t.closest('[data-goal-add]'); if (addGs) return goalDeposit(addGs.dataset.goalAdd);
+    // تنظیمات
+    if (t.closest('#testNotifBtn')) { Bridge.showNotification('✅ اعلان فینوا فعال است', 'یادآوری اقساط و بودجه به‌موقع می‌رسد.', 1, 'test'); return UI.toast('اعلان ارسال شد', 'ok'); }
+    if (t.closest('#saveAIBtn')) { state.aiBaseURL = document.getElementById('aiBase').value.trim(); state.aiApiKey = document.getElementById('aiKey').value.trim(); state.aiModel = document.getElementById('aiModel').value.trim() || 'gpt-4o-mini'; saveState(); return UI.toast('تنظیمات AI ذخیره شد ✅', 'ok'); }
+    if (t.closest('#saveRatesBtn')) { state.manualUSD = document.getElementById('mUSD').value; state.manualGold = document.getElementById('mGold').value; saveState(); return UI.toast('ذخیره شد', 'ok'); }
+    if (t.closest('#bkEncBtn')) return backupFile(true);
+    if (t.closest('#bkPlainBtn')) return backupFile(false);
+    if (t.closest('#restoreBtn')) return pickFileAndRestore();
+    if (t.closest('#exportDataBtn')) return UI.modal('داده JSON', `<textarea style="width:100%;height:220px;background:var(--bg2);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:10px" readonly>${esc(exportPayload())}</textarea>`);
+    if (t.closest('#wipeBtn')) return wipeConfirm();
+    if (t.closest('#addCatBtn')) return catForm();
+    if (t.closest('#addWalletBtn')) return walletForm();
+    // گزارش‌ها
+    if (t.closest('#pdfBtn')) return exportPDF();
+    if (t.closest('#shareBtn')) return shareCard();
+    if (t.closest('#csvBtn')) return exportCSV();
+    if (t.closest('#shareTextBtn')) return shareTextReport();
+  }
+  function viewInputHandler(e) {
+    const t = e.target;
+    if (t.id === 'searchInp') { searchQ = t.value; const l = filteredTxs(); refreshTxList(l); }
+    if (t.id === 'fFrom') { filterFrom = t.value; refreshTxList(filteredTxs()); }
+    if (t.id === 'fTo') { filterTo = t.value; refreshTxList(filteredTxs()); }
+    if (t.id === 'strictPct') { state.strict.pct = +t.value; saveState(); }
+  }
+  function viewChangeHandler(e) {
+    const t = e.target;
+    if (t.id === 'fCat') { filterCat = t.value; refreshTxList(filteredTxs()); }
+    if (t.id === 'swLock') return toggleLock(t.checked);
+    if (t.id === 'swStrict') { state.strict.enabled = t.checked; saveState(); render('settings'); }
+    if (t.id === 'swBudgetAlert') { state.notify.budgetAlert = t.checked; saveState(); }
+    if (t.id === 'swAutoBk') { state.backup.auto = t.checked; saveState(); }
+  }
+  function refreshTxList(list) {
+    const card = document.querySelectorAll('#view .card')[1];
+    if (card && curTab === 'transactions') {
+      card.querySelector('.card-title').innerHTML = `نتایج (${faDigits(list.length)}) <small style="font-weight:400;color:var(--txt3)">مجموع: ${fmtShort(list.filter(t => t.status === 'paid').reduce((a, t) => a + (t.type === 'income' ? t.amount * t.rate : -(t.amount * t.rate)), 0))} ت</small>`;
+      const listEl = card.querySelector('.list') || card;
+      listEl.innerHTML = list.length ? list.slice(0, 80).map(txRowHTML).join('') : '<div class="empty"><div class="big">🔍</div>تراکنشی پیدا نشد</div>';
+    }
+  }
+
+  async function toggleLock(on) {
+    if (on) {
+      const pin = enDigits(await UI.prompt('تنظیم رمز ورود', 'یک رمز ۴ رقمی وارد کنید:', 'password')) || '';
+      if (!pin || pin.length < 4) { UI.toast('رمز باید حداقل ۴ رقم باشد', 'bad'); render('settings'); return; }
+      const salt = String(Math.random()).slice(2, 10);
+      state.lock = { enabled: true, pinHash: simpleHash(pin + salt), salt };
+      UI.toast('قفل فعال شد ✅', 'ok');
+    } else {
+      state.lock = { enabled: false, pinHash: '', salt: '' };
+      UI.toast('قفل غیرفعال شد', 'ok');
+    }
+    await saveState();
+  }
+  function stopRuleConfirm(id) {
+    UI.confirm('توقف قسط ماهانه', 'این قسط ماهانه متوقف می‌شود (اقساط ثبت‌شده قبلی باقی می‌مانند). ادامه؟', async () => {
+      const r = rules.find(x => x.id === id); if (r) r.active = false;
+      await persist('rules'); UI.toast('متوقف شد', 'ok'); render('installments');
+    });
+  }
+  function wipeConfirm() {
+    UI.confirm('پاک‌سازی کامل!', 'همه داده‌ها برای همیشه حذف می‌شوند و قابل بازگشت نیستند. مطمئنی؟', async () => {
+      await Store.wipeAll();
+      txs = []; rules = []; budgets = []; goals = []; wallets = DEF_WALLETS.slice(); categories = DEF_CATEGORIES.slice();
+      state = defaultState();
+      await Store.bulkPut('categories', categories); await Store.bulkPut('wallets', wallets);
+      await saveState();
+      UI.toast('همه داده‌ها واقعاً پاک شد ✅', 'ok');
+      render('dashboard');
+    });
+  }
+  function pickFileAndRestore() {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.json,.enc,application/json';
+    inp.onchange = async () => {
+      const f = inp.files[0]; if (!f) return;
+      let text = await f.text();
+      try {
+        if (text.startsWith('FENC1:')) {
+          const pass = await UI.prompt('رمز فایل', 'رمز پشتیبان را وارد کنید:', 'password');
+          if (!pass) return;
+          text = await decryptText(text, pass);
+        }
+        await importPayload(text);
+      } catch (e) { UI.toast('بازگشایی ناموفق: رمز اشتباه یا فایل خراب است', 'bad'); }
+    };
+    inp.click();
+  }
+
+  /* ── شیت ثبت جدید ── */
+  function showAddSheet() {
+    const m = UI.sheet(`
+      <h3>ثبت جدید</h3>
+      <button class="sheet-item" data-add="income"><span class="si-ico">💰</span><span>درآمد</span></button>
+      <button class="sheet-item" data-add="expense"><span class="si-ico">🧾</span><span>هزینه</span></button>
+      <button class="sheet-item" data-add="installment"><span class="si-ico">📅</span><span>قسط / پرداخت دوره‌ای</span></button>
+      <button class="sheet-item" data-add="budget"><span class="si-ico">🎯</span><span>بودجه دسته</span></button>
+      <button class="sheet-item" data-add="goal"><span class="si-ico">🏆</span><span>هدف مالی</span></button>
+    `);
+    m.addEventListener('click', e => {
+      const a = e.target.closest('[data-add]');
+      if (!a) return;
+      m.remove();
+      const kind = a.dataset.add;
+      if (kind === 'income') txForm('income');
+      if (kind === 'expense') txForm('expense');
+      if (kind === 'installment') ruleForm();
+      if (kind === 'budget') budgetForm();
+      if (kind === 'goal') goalForm();
+    });
+  }
+
+  /* ── فرم تراکنش (با حالت سختگیرانه) ── */
+  function txForm(type, preset) {
+    const t = jToday();
+    const isInc = type === 'income';
+    const cats = categories.filter(c => isInc ? c.type === 'income' : c.type !== 'income');
+    UI.modal(isInc ? '💰 ثبت درآمد' : '🧾 ثبت هزینه', `
+      <div class="field"><label>عنوان</label><input id="txTitle" placeholder="${isInc ? 'مثلاً حقوق آبان' : 'مثلاً خرید هفتگی'}" value="${preset && preset.title || ''}"></div>
+      <div class="field"><label>مبلغ (تومان)</label><input id="txAmount" type="number" dir="ltr" placeholder="0" value="${preset && preset.amount || ''}"></div>
+      <div class="field"><label>تاریخ (جلالی — سال/ماه/روز)</label><input id="txDate" dir="ltr" value="${jKey(preset && preset.date || t)}"></div>
+      <div class="field-inline">
+        <div class="field"><label>دسته</label><select id="txCat">${cats.map(c => `<option value="${c.id}" ${preset && preset.categoryId === c.id ? 'selected' : ''}>${c.icon} ${esc(c.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>کیف پول</label><select id="txWallet">${wallets.map(w => `<option value="${w.id}">${esc(w.name)}</option>`).join('')}</select></div>
+      </div>
+      ${!isInc ? `<div class="field"><label>اولویت (۱ = مهم‌ترین)</label><div class="seg" id="txPri">${[1,2,3,4,5].map(p => `<button data-p="${p}" class="${(preset && preset.priority || 3) === p ? 'on' : ''}">${faDigits(p)}</button>`).join('')}</div></div>
+      <div class="switch-row"><span>هزینه ضروری (مسکن، خوراک، قبض…)</span><label class="switch"><input type="checkbox" id="txEss" ${preset && preset.essential ? 'checked' : ''}><span class="sw"></span></label></div>` : ''}
+      <div class="field"><label>برچسب‌ها (با ویرگول)</label><input id="txTags" placeholder="مثلاً ضروری، خانه"></div>
+      <div class="field"><label>یادداشت</label><textarea id="txNote" rows="2" placeholder="اختیاری"></textarea></div>
+      ${!isInc ? `<div class="field"><label>📎 تصویر رسید (اختیاری)</label><input id="txReceipt" type="file" accept="image/*"></div>` : ''}
+      <button class="btn full" id="txSaveBtn">${isInc ? 'ثبت درآمد' : 'ثبت هزینه'}</button>
+    `);
+    let pri = (preset && preset.priority) || 3;
+    const priEl = document.getElementById('txPri');
+    if (priEl) priEl.onclick = e => { const b = e.target.closest('[data-p]'); if (!b) return; pri = +b.dataset.p; [...priEl.children].forEach(x => x.classList.toggle('on', x === b)); };
+    document.getElementById('txSaveBtn').onclick = async () => {
+      const title = document.getElementById('txTitle').value.trim();
+      const amount = +enDigits(document.getElementById('txAmount').value);
+      const jdate = enDigits(document.getElementById('txDate').value).replace(/[^0-9/]/g, '');
+      if (!title) return UI.toast('عنوان را وارد کنید', 'warn');
+      if (!amount || amount <= 0) return UI.toast('مبلغ معتبر وارد کنید', 'warn');
+      if (!/^\d{4}\/\d{2}(\/\d{2})?$/.test(jdate)) return UI.toast('تاریخ را به شکل ۱۴۰۳/۰۹/۱۵ وارد کنید', 'warn');
+      // حالت سختگیرانه برای هزینه غیرضروری
+      if (!isInc) {
+        const ess = document.getElementById('txEss') && document.getElementById('txEss').checked;
+        if (!ess) {
+          const warn = strictCheck(amount);
+          if (warn) {
+            return UI.confirm('⚠️ هشدار حالت سختگیرانه', warn.why + '\nآیا مطمئنی که این هزینه را ثبت می‌کنی؟', () => doSave(false), () => {});
+          }
+        }
+      }
+      doSave(true);
+      async function doSave(skip) {
+        const receiptEl = document.getElementById('txReceipt');
+        let receiptId = null;
+        if (receiptEl && receiptEl.files[0]) {
+          try {
+            const f = receiptEl.files[0];
+            const b64 = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.readAsDataURL(f); });
+            receiptId = uid('rc');
+            await Store.put('receipts', { id: receiptId, mime: f.type, data: b64 }, receiptId);
+          } catch (e) { console.warn('receipt', e); }
+        }
+        const tags = document.getElementById('txTags').value.split(/[,،]/).map(s => s.trim()).filter(Boolean);
+        txs.push(normTx({
+          type, title, amount, jdate,
+          categoryId: document.getElementById('txCat').value,
+          walletId: document.getElementById('txWallet').value,
+          priority: pri, essential: document.getElementById('txEss') ? document.getElementById('txEss').checked : false,
+          tags, note: document.getElementById('txNote').value, status: 'paid', receiptId,
+        }));
+        await persist('transactions');
+        UI.closeModal();
+        UI.toast(isInc ? 'درآمد ثبت شد ✅' : 'هزینه ثبت شد ✅', 'ok');
+        Bridge.vibrate(30);
+        scheduleNotifications();
+        render(curTab);
+      }
+    };
+  }
+
+  /* ── مودال تراکنش (مشاهده/پرداخت/حذف) ── */
+  function txModal(t) {
+    if (!t) return;
+    const cat = categories.find(c => c.id === t.categoryId);
+    const canPay = t.type === 'installment' && t.status === 'pending';
+    const bal = walletBalance();
+    const enough = bal >= t.amount * t.rate;
+    UI.modal('جزئیات ' + (t.type === 'income' ? 'درآمد' : t.type === 'installment' ? 'قسط' : 'هزینه'), `
+      <div style="text-align:center;padding:8px 0 16px">
+        <div style="font-size:26px;font-weight:900;color:${t.status === 'paid' ? (t.type === 'income' ? 'var(--ok2)' : 'var(--bad2)') : 'var(--warn2)'}">${fmtNum(t.amount * t.rate)} <small style="font-size:13px;color:var(--txt3)">تومان</small></div>
+        <div style="margin-top:6px;font-size:14px">${esc(t.title)} ${t.essential ? '<span class="badge violet">ضروری</span>' : ''}</div>
+        <div style="margin-top:4px;font-size:11.5px;color:var(--txt3)">${jDateLabel(t.jdate)} ${t.dueJdate && t.dueJdate !== t.jdate ? '• موعد: ' + jDateLabel(t.dueJdate) : ''} ${cat ? '• ' + cat.icon + ' ' + esc(cat.name) : ''}</div>
+        ${t.note ? `<div style="margin-top:8px;font-size:12px;color:var(--txt2)">${esc(t.note)}</div>` : ''}
+        ${(t.tags || []).length ? `<div style="margin-top:6px">${t.tags.map(g => `<span class="tag">#${esc(g)}</span>`).join(' ')}</div>` : ''}
+      </div>
+      ${canPay ? `<div class="ai-bubble" style="margin-bottom:12px;font-size:12px">${enough ? '✅ موجودی کافی داری.' : `⚠️ موجودی (${fmtToman(bal)}) کافی نیست — کسری: ${fmtToman(t.amount * t.rate - bal)}`}</div>` : ''}
+      ${canPay ? `<button class="btn ok full" id="payBtn">✅ پرداخت شد (${fmtShort(t.amount * t.rate)})</button><div style="height:9px"></div>` : ''}
+      ${t.type === 'expense' && t.status === 'paid' ? `<button class="btn ghost full" id="editAmtBtn">✏️ تغییر مبلغ</button><div style="height:9px"></div>` : ''}
+      <button class="btn danger full" id="delTxBtn">🗑 حذف تراکنش</button>
+    `);
+    const pay = document.getElementById('payBtn');
+    if (pay) pay.onclick = async () => {
+      t.status = 'paid'; t.jdate = t.jdate || jKey(jToday());
+      await persist('transactions');
+      // اگر قسط فعال باقی مانده‌هاست و قانون فعال است — قبلاً خودکار ساخته شده
+      UI.closeModal(); UI.toast('قسط پرداخت شد ✅', 'ok'); Bridge.vibrate(40);
+      Bridge.updateWidget(fmtShort(walletBalance()) + ' تومان', nextInstallmentLine(0), nextInstallmentLine(1), jDateLabel(jKey(jToday())));
+      scheduleNotifications();
+      render(curTab);
+    };
+    const edit = document.getElementById('editAmtBtn');
+    if (edit) edit.onclick = async () => {
+      const v = await UI.prompt('مبلغ جدید', 'مبلغ جدید به تومان:', 'number', String(t.amount));
+      if (v && +v > 0) { t.amount = +v; await persist('transactions'); UI.closeModal(); render(curTab); }
+    };
+    document.getElementById('delTxBtn').onclick = () => {
+      UI.confirm('حذف تراکنش', 'این تراکنش حذف شود؟', async () => {
+        txs = txs.filter(x => x.id !== t.id);
+        await persist('transactions');
+        UI.closeModal(); UI.toast('حذف شد', 'ok'); render(curTab);
+      });
+    };
+  }
+
+  /* ── فرم قسط ماهانه (قانون) ── */
+  function ruleForm() {
+    const cats = categories.filter(c => c.type !== 'income');
+    UI.modal('📅 قسط / پرداخت ماهانه', `
+      <p style="font-size:11.5px;color:var(--txt2);margin:0 0 12px">هر ماه به‌صورت خودکار و بدون تکرار ساخته می‌شود (اجاره بالاترین اولویت را بگیرد).</p>
+      <div class="field"><label>عنوان</label><input id="rTitle" placeholder="مثلاً اجاره خانه / قسط وام"></div>
+      <div class="field"><label>مبلغ هر قسط (تومان)</label><input id="rAmount" type="number" dir="ltr" placeholder="0"></div>
+      <div class="switch-row"><span>مبلغ متغیر است (هر ماه دستی وارد می‌کنم)</span><label class="switch"><input type="checkbox" id="rVar"><span class="sw"></span></label></div>
+      <div class="field-inline">
+        <div class="field"><label>روز ماه (جلالی)</label><input id="rDay" type="number" dir="ltr" value="1" min="1" max="31"></div>
+        <div class="field"><label>تعداد قسط مانده (۰ = بی‌پایان)</label><input id="rRem" type="number" dir="ltr" value="0" min="0"></div>
+      </div>
+      <div class="field"><label>اولویت (۱ = مهم‌ترین)</label><div class="seg" id="rPri">${[1,2,3,4,5].map(p => `<button data-p="${p}" class="${p === 1 ? 'on' : ''}">${faDigits(p)}</button>`).join('')}</div></div>
+      <div class="switch-row"><span>قسط ضروری</span><label class="switch"><input type="checkbox" id="rEss" checked><span class="sw"></span></label></div>
+      <div class="field-inline">
+        <div class="field"><label>دسته</label><select id="rCat">${cats.map(c => `<option value="${c.id}">${c.icon} ${esc(c.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>کیف پول</label><select id="rWallet">${wallets.map(w => `<option value="${w.id}">${esc(w.name)}</option>`).join('')}</select></div>
+      </div>
+      <button class="btn full" id="rSaveBtn">ثبت قسط ماهانه</button>
+    `);
+    let pri = 1;
+    document.getElementById('rPri').onclick = e => { const b = e.target.closest('[data-p]'); if (!b) return; pri = +b.dataset.p; [...document.getElementById('rPri').children].forEach(x => x.classList.toggle('on', x === b)); };
+    document.getElementById('rSaveBtn').onclick = async () => {
+      const title = document.getElementById('rTitle').value.trim();
+      const amount = +enDigits(document.getElementById('rAmount').value) || 0;
+      const day = Math.min(31, Math.max(1, +document.getElementById('rDay').value || 1));
+      if (!title) return UI.toast('عنوان را وارد کنید', 'warn');
+      if (!document.getElementById('rVar').checked && amount <= 0) return UI.toast('مبلغ معتبر وارد کنید', 'warn');
+      const isRent = title.includes('اجاره');
+      rules.push(normRule({
+        title, amount, day, priority: isRent ? 1 : pri, essential: isRent ? true : document.getElementById('rEss').checked,
+        variable: document.getElementById('rVar').checked,
+        categoryId: document.getElementById('rCat').value, walletId: document.getElementById('rWallet').value,
+        remainingMonths: +document.getElementById('rRem').value || 0, active: true, lastKey: '',
+      }));
+      await persist('rules');
+      generateRecurring();
+      UI.closeModal(); UI.toast('قسط ماهانه ثبت شد ✅', 'ok');
+      scheduleNotifications();
+      render(curTab === 'installments' ? 'installments' : curTab);
+    };
+  }
+
+  /* ── فرم بودجه / هدف / دسته / کیف ── */
+  function budgetForm() {
+    const mk = jMonthKey(jToday());
+    const expCats = categories.filter(c => c.type !== 'income');
+    UI.modal('🎯 بودجه دسته — ' + jMonthLabel(mk), `
+      <div class="field"><label>دسته</label><select id="bCat">${expCats.map(c => `<option value="${c.id}">${c.icon} ${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>سقف ماهانه (تومان)</label><input id="bLimit" type="number" dir="ltr" placeholder="0"></div>
+      <button class="btn full" id="bSaveBtn">ثبت بودجه</button>
+    `);
+    document.getElementById('bSaveBtn').onclick = async () => {
+      const cid = document.getElementById('bCat').value;
+      const limit = +enDigits(document.getElementById('bLimit').value) || 0;
+      if (limit <= 0) return UI.toast('سقف معتبر وارد کنید', 'warn');
+      const ex = budgets.find(b => b.jmonth === mk && b.categoryId === cid);
+      if (ex) ex.limit = limit; else budgets.push({ id: uid('b'), jmonth: mk, categoryId: cid, limit });
+      await persist('budgets');
+      UI.closeModal(); UI.toast('بودجه ثبت شد ✅', 'ok'); render(curTab === 'budgets' ? 'budgets' : curTab);
+    };
+  }
+  function goalForm() {
+    UI.modal('🏆 هدف مالی جدید', `
+      <div class="field"><label>عنوان</label><input id="gTitle" placeholder="مثلاً سفر شمال / لپ‌تاپ"></div>
+      <div class="field-inline">
+        <div class="field"><label>مبلغ هدف (تومان)</label><input id="gTarget" type="number" dir="ltr"></div>
+        <div class="field"><label>پس‌انداز فعلی</label><input id="gSaved" type="number" dir="ltr" value="0"></div>
+      </div>
+      <div class="field"><label>مهلت (جلالی) — اختیاری</label><input id="gDead" dir="ltr" placeholder="۱۴۰۴/۰۶/۰۱"></div>
+      <button class="btn full" id="gSaveBtn">ثبت هدف</button>
+    `);
+    document.getElementById('gSaveBtn').onclick = async () => {
+      const title = document.getElementById('gTitle').value.trim();
+      const target = +enDigits(document.getElementById('gTarget').value) || 0;
+      if (!title || target <= 0) return UI.toast('عنوان و مبلغ هدف را وارد کنید', 'warn');
+      let deadlineJ = enDigits(document.getElementById('gDead').value).replace(/[^0-9/]/g, '');
+      goals.push(normGoal({ title, target, saved: +enDigits(document.getElementById('gSaved').value) || 0, deadlineJ: /^\d{4}\/\d{2}(\/\d{2})?$/.test(deadlineJ) ? deadlineJ : null }));
+      await persist('goals');
+      UI.closeModal(); UI.toast('هدف ثبت شد 🏆', 'ok'); render(curTab === 'goals' ? 'goals' : curTab);
+    };
+  }
+  function goalDeposit(id) {
+    UI.prompt('پس‌انداز برای هدف', 'چقدر به این هدف اضافه می‌کنی؟ (تومان)', 'number', '', async (v) => {
+      const g = goals.find(x => x.id === id); if (!g || !(+v > 0)) return;
+      const before = g.target ? Math.round(g.saved / g.target * 100) : 0;
+      g.saved += +v;
+      await persist('goals');
+      const after = g.target ? Math.round(g.saved / g.target * 100) : 0;
+      [25, 50, 75, 100].forEach(m => { if (before < m && after >= m) { UI.toast(m === 100 ? '🎉 هدف کامل شد!' : `🎉 ${faDigits(m)}٪ هدف گذشت!`, 'ok'); Bridge.vibrate(60); } });
+      render('goals');
+    });
+  }
+  function catForm() {
+    UI.modal('＋ دسته جدید', `
+      <div class="field"><label>نام</label><input id="cName" placeholder="مثلاً ورزش"></div>
+      <div class="field"><label>آیکون (ایموجی)</label><input id="cIcon" value="🧾"></div>
+      <div class="field"><label>نوع</label><div class="seg" id="cType"><button data-p="expense" class="on">هزینه</button><button data-p="income">درآمد</button></div></div>
+      <div class="switch-row"><span>ضروری (در حالت سختگیرانه مستثنی)</span><label class="switch"><input type="checkbox" id="cEss"><span class="sw"></span></label></div>
+      <button class="btn full" id="cSaveBtn">ثبت</button>
+    `);
+    let type = 'expense';
+    document.getElementById('cType').onclick = e => { const b = e.target.closest('[data-p]'); if (!b) return; type = b.dataset.p; [...document.getElementById('cType').children].forEach(x => x.classList.toggle('on', x === b)); };
+    document.getElementById('cSaveBtn').onclick = async () => {
+      const name = document.getElementById('cName').value.trim();
+      if (!name) return UI.toast('نام را وارد کنید', 'warn');
+      categories.push({ id: uid('c'), name, icon: document.getElementById('cIcon').value || '🧾', type, essential: document.getElementById('cEss').checked, color: '#22d3ee' });
+      await persist('categories');
+      UI.closeModal(); UI.toast('دسته اضافه شد ✅', 'ok'); render('settings');
+    };
+  }
+  function walletForm() {
+    UI.modal('＋ کیف پول جدید', `
+      <div class="field"><label>نام</label><input id="wName" placeholder="مثلاً کارت بانک ملت"></div>
+      <div class="field"><label>موجودی اولیه (تومان)</label><input id="wInit" type="number" dir="ltr" value="0"></div>
+      <button class="btn full" id="wSaveBtn">ثبت</button>
+    `);
+    document.getElementById('wSaveBtn').onclick = async () => {
+      const name = document.getElementById('wName').value.trim();
+      if (!name) return UI.toast('نام را وارد کنید', 'warn');
+      wallets.push(normWallet({ name, initial: +document.getElementById('wInit').value || 0 }));
+      await persist('wallets');
+      UI.closeModal(); UI.toast('کیف پول اضافه شد ✅', 'ok'); render('settings');
+    };
+  }
+
+  /* ── خروجی‌ها ── */
+  async function exportPDF() {
+    UI.toast('در حال ساخت PDF…', 'ok');
+    const mk = jMonthKey(jToday());
+    const s = monthStats();
+    const c = document.createElement('canvas');
+    const W = 1000; c.width = W;
+    const x = c.getContext('2d');
+    const rows = txs.filter(t => t.jdate.startsWith(mk)).sort((a, b) => (a.jdate || '').localeCompare(b.jdate || ''));
+    const H = 340 + Math.max(1, rows.length) * 44 + 140;
+    c.height = H;
+    // پس‌زمینه روشن برای چاپ
+    x.fillStyle = '#ffffff'; x.fillRect(0, 0, W, H);
+    x.fillStyle = '#0b1120'; x.fillRect(0, 0, W, 120);
+    x.fillStyle = '#00e5ff'; x.font = '900 40px Vazirmatn,Tahoma'; x.textAlign = 'center';
+    x.fillText('◈ فینوا — گزارش مالی ' + jMonthLabel(mk), W / 2, 75);
+    let y = 180;
+    x.textAlign = 'right'; x.fillStyle = '#0f1b33'; x.font = '800 26px Vazirmatn,Tahoma';
+    x.fillText('خلاصه ماه', W - 60, y); y += 24;
+    x.font = '22px Vazirmatn,Tahoma';
+    [['درآمد', s.income, '#059669'], ['هزینه', s.expense, '#dc2626'], ['اقساط پرداخت‌شده', s.installPaid, '#0891b2'], ['اقساط مانده', s.installPending, '#d97706'], ['موجودی کل', walletBalance(), '#0f1b33']].forEach(r => {
+      x.fillStyle = '#334155'; x.fillText(r[0], W - 60, y + 24);
+      x.textAlign = 'left'; x.fillStyle = r[2]; x.fillText(fmtNum(r[1]) + ' تومان', 60, y + 24); x.textAlign = 'right';
+      y += 44;
+    });
+    y += 16; x.fillStyle = '#0f1b33'; x.font = '800 26px Vazirmatn,Tahoma';
+    x.fillText('تراکنش‌های ماه (' + faDigits(rows.length) + ')', W - 60, y); y += 34;
+    x.font = '20px Vazirmatn,Tahoma';
+    x.fillStyle = '#64748b'; x.fillText('عنوان', W - 60, y); x.fillText('تاریخ', W - 420, y); x.textAlign = 'left'; x.fillText('مبلغ', 60, y); x.textAlign = 'right';
+    y += 16;
+    x.strokeStyle = '#e2e8f0'; x.beginPath(); x.moveTo(50, y); x.lineTo(W - 50, y); x.stroke(); y += 30;
+    rows.forEach(t => {
+      x.fillStyle = '#1e293b'; x.fillText(t.title.slice(0, 24), W - 60, y);
+      x.fillStyle = '#64748b'; x.fillText(faDigits(t.jdate), W - 420, y);
+      x.textAlign = 'left'; x.fillStyle = t.type === 'income' ? '#059669' : '#dc2626';
+      x.fillText((t.type === 'income' ? '+ ' : '− ') + fmtNum(t.amount * t.rate), 60, y); x.textAlign = 'right';
+      y += 40;
+    });
+    x.fillStyle = '#94a3b8'; x.font = '16px Vazirmatn,Tahoma'; x.textAlign = 'center';
+    x.fillText('تولید شده در ' + todayLabel() + ' — اپلیکیشن فینوا', W / 2, H - 40);
+    const { b64 } = await Charts.canvasToPdf([c]);
+    await Bridge.saveFile('finova-report-' + mk.replace('/', '-') + '.pdf', 'application/pdf', b64);
+    UI.toast('PDF ذخیره شد در Downloads ✅', 'ok');
+  }
+  async function shareCard() {
+    const s = monthStats();
+    const c = Charts.reportCardCanvas({ month: jMonthKey(jToday()), balance: walletBalance(), income: s.income, expense: s.expense, installPaid: s.installPaid, installUpcoming: s.installPending, health: healthScore() });
+    const b64 = c.toDataURL('image/png').split(',')[1];
+    await Bridge.shareFile('finova-card-' + jKey(jToday()).replace(/\//g, '-') + '.png', 'image/png', b64);
+  }
+  function exportCSV() {
+    const head = 'date,type,title,category,amount_toman,wallet,status,tags\n';
+    const lines = txs.map(t => {
+      const cat = categories.find(c => c.id === t.categoryId);
+      const w = wallets.find(w => w.id === t.walletId);
+      return [t.jdate, t.type, '"' + (t.title || '').replace(/"/g, '""') + '"', cat ? cat.name : '', Math.round(t.amount * t.rate), w ? w.name : '', t.status, '"' + (t.tags || []).join('|') + '"'].join(',');
+    }).join('\n');
+    const b64 = Charts.bufToB64(new TextEncoder().encode('\uFEFF' + head + lines).buffer);
+    Bridge.saveFile('finova-transactions.csv', 'text/csv', b64);
+    UI.toast('CSV ذخیره شد (قابل باز کردن در Excel) ✅', 'ok');
+  }
+  function shareTextReport() {
+    const s = monthStats();
+    const txt = `◈ گزارش مالی ${jMonthLabel()} — فینوا\n\nموجودی کل: ${fmtToman(walletBalance())}\nدرآمد: ${fmtToman(s.income)}\nهزینه: ${fmtToman(s.expense)}\nاقساط پرداختی: ${fmtToman(s.installPaid)}\nاقساط مانده: ${fmtToman(s.installPending)}\nامتیاز سلامت: ${faDigits(healthScore())}/۱۰۰\n\n${jDateLabel(jKey(jToday()))}`;
+    Bridge.shareText(txt);
+  }
+
+  /* ═══ ابزارها ═══ */
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function mdLite(s) {
+    let h = esc(s);
+    h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    h = h.replace(/^#{1,4} (.+)$/gm, '<h4>$1</h4>');
+    h = h.replace(/^[-•] (.+)$/gm, '<li>$1</li>').replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, '<ul>$1</ul>');
+    return h;
+  }
+
+  return {
+    boot, render, get state() { return state; }, get txs() { return txs; }, get rules() { return rules; },
+    get budgets() { return budgets; }, get goals() { return goals; }, get wallets() { return wallets; },
+    get categories() { return categories; }, get lastRates() { return lastRates; }, set lastRates(v) { lastRates = v; },
+    walletBalance, monthStats, healthScore, scheduleNotifications, generateRecurring, saveState,
+    exportPayload, importPayload, backupFile, encryptText, decryptText, strictCheck, persist,
+  };
+})();
+
+/* ═══ UI — Toast / Modal / Sheet / Prompt ═══ */
+const UI = (() => {
+  function toast(msg, kind) {
+    const w = document.getElementById('toastWrap');
+    const t = document.createElement('div');
+    t.className = 'toast ' + (kind || '');
+    t.textContent = msg;
+    w.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; t.style.transition = '.4s'; setTimeout(() => t.remove(), 400); }, 2600);
+  }
+  function modal(title, html) {
+    const root = document.getElementById('modalRoot');
+    const bd = document.createElement('div');
+    bd.className = 'modal-backdrop';
+    bd.innerHTML = `<div class="modal"><h3>${title}</h3>${html}</div>`;
+    bd.addEventListener('click', e => { if (e.target === bd) bd.remove(); });
+    root.appendChild(bd);
+    return bd;
+  }
+  function closeModal() { const m = document.querySelector('#modalRoot .modal-backdrop'); if (m) m.remove(); }
+  function sheet(html) {
+    const root = document.getElementById('modalRoot');
+    const bd = document.createElement('div');
+    bd.className = 'sheet-backdrop';
+    bd.innerHTML = `<div class="sheet"><div class="sheet-handle"></div>${html}</div>`;
+    bd.addEventListener('click', e => { if (e.target === bd) bd.remove(); });
+    root.appendChild(bd);
+    return bd;
+  }
+  function confirm(title, text, onYes, onNo) {
+    const m = modal('⚠️ ' + title, `
+      <p style="font-size:13.5px;line-height:2;white-space:pre-wrap">${text}</p>
+      <div class="btn-row"><button class="btn danger" id="cfY">بله، ادامه</button><button class="btn ghost" id="cfN">انصراف</button></div>`);
+    m.querySelector('#cfY').onclick = () => { m.remove(); onYes && onYes(); };
+    m.querySelector('#cfN').onclick = () => { m.remove(); onNo && onNo(); };
+  }
+  function prompt(title, text, inputType, preset, cb) {
+    return new Promise(res => {
+      const m = modal(title, `
+        <p style="font-size:12.5px;color:var(--txt2);line-height:1.9">${text}</p>
+        <div class="field"><input id="prInp" type="${inputType || 'text'}" dir="${inputType === 'password' || inputType === 'number' ? 'ltr' : 'auto'}" value="${preset || ''}"></div>
+        <div class="btn-row"><button class="btn" id="prY">تأیید</button><button class="btn ghost" id="prN">انصراف</button></div>`);
+      const inp = m.querySelector('#prInp');
+      setTimeout(() => inp.focus(), 120);
+      const done = (v) => { m.remove(); cb && cb(v); res(v); };
+      m.querySelector('#prY').onclick = () => done(inp.value);
+      m.querySelector('#prN').onclick = () => done(null);
+      inp.onkeydown = e => { if (e.key === 'Enter') done(inp.value); };
+    });
+  }
+  return { toast, modal, closeModal, sheet, confirm, prompt };
+})();
+
+/* ═══ شروع ═══ */
+document.addEventListener('DOMContentLoaded', () => App.boot());

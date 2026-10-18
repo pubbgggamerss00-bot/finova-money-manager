@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- لوگوی فینوا: لوزی نئونی + نماد تومان -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- حلقه بیرونی نئون -->
+    <path
+        android:pathData="M54,20 L82,54 L54,88 L26,54 Z"
+        android:strokeColor="#22D3EE"
+        android:strokeWidth="4.5"
+        android:fillColor="#00000000"/>
+    <path
+        android:pathData="M54,28 L76,54 L54,80 L32,54 Z"
+        android:fillColor="#131C31"
+        android:strokeColor="#D946EF"
+        android:strokeWidth="2"/>
+    <!-- نماد ت (تومان) -->
+    <path
+        android:pathData="M46,45 L62,45 M54,45 L54,64 M48,64 L60,64"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"/>
+    <path
+        android:pathData="M62,42 A4,4 0 1,1 62,42.01 Z"
+        android:fillColor="#22D3EE"/>
+</vector>
