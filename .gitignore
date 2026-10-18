@@ -2,3 +2,4 @@ android/build_work/
 android/finova-key.jks
 *.apk.tmp
 android/*.apk
+*.idsig
