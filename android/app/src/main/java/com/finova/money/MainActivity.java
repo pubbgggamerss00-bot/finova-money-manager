@@ -22,6 +22,7 @@ import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
 import android.provider.MediaStore;
+import android.provider.Settings;
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
@@ -343,6 +344,95 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void exitApp() { main.postDelayed(() -> finishAndRemoveTask(), 100); }
+
+        /* ═══ بروزرسانی: دانلود APK با پیشرفت + نصب با FileProvider ═══ */
+
+        /** دانلود APK در پوشه اختصاصی برنامه — پاسخ‌ها: __dlCb(id, phase, a, b)
+         *  phase: progress(received,total) | done(path) | error(msg) */
+        @JavascriptInterface
+        public void downloadApk(final String id, final String urlStr) {
+            pool.execute(() -> {
+                File dir = new File(getExternalFilesDir(null), "update");
+                if (!dir.exists()) dir.mkdirs();
+                File part = new File(dir, "Finova-update.apk.part");
+                File out = new File(dir, "Finova-update.apk");
+                try {
+                    HttpURLConnection c = (HttpURLConnection) new URL(urlStr).openConnection();
+                    c.setRequestMethod("GET");
+                    c.setConnectTimeout(15000);
+                    c.setReadTimeout(60000);
+                    c.setInstanceFollowRedirects(true);
+                    c.setRequestProperty("User-Agent", "Finova/1.0 (Android)");
+                    int code = c.getResponseCode();
+                    if (code >= 400) throw new Exception("HTTP " + code);
+                    long total = c.getContentLength();
+                    InputStream is = c.getInputStream();
+                    FileOutputStream fo = new FileOutputStream(part);
+                    byte[] buf = new byte[16384];
+                    long received = 0, lastTick = -1;
+                    int r;
+                    while ((r = is.read(buf)) > 0) {
+                        fo.write(buf, 0, r);
+                        received += r;
+                        // هر ۱٪ یا هر ۶۴ کیلوبایت یک بار پیشرفت را بفرست
+                        long tick = total > 0 ? received * 100 / total : received / 65536;
+                        if (tick != lastTick) { lastTick = tick; dlCb(id, "progress", received, Math.max(total, 0)); }
+                    }
+                    fo.close(); is.close();
+                    if (out.exists()) out.delete();
+                    if (!part.renameTo(out) || out.length() == 0) throw new Exception("finalize failed");
+                    dlDone(id, "done", out.getAbsolutePath());
+                } catch (Exception e) {
+                    try { part.delete(); } catch (Exception ignored) {}
+                    dlDone(id, "error", "خطا در دانلود: " + e.getMessage());
+                }
+            });
+        }
+
+        private void dlCb(String id, String phase, long a, long b) {
+            final String call = "window.__dlCb && window.__dlCb(" + org.json.JSONObject.quote(id) + "," +
+                    org.json.JSONObject.quote(phase) + "," + a + "," + b + ");";
+            main.post(() -> web.evaluateJavascript(call, null));
+        }
+        private void dlDone(String id, String phase, String s) {
+            final String call = "window.__dlCb && window.__dlCb(" + org.json.JSONObject.quote(id) + "," +
+                    org.json.JSONObject.quote(phase) + "," + org.json.JSONObject.quote(s) + ",0);";
+            main.post(() -> web.evaluateJavascript(call, null));
+        }
+
+        /** باز کردن Intent نصب — اگر مجوز «منابع ناشناس» نبود، صفحه تنظیمات باز می‌شود
+         *  پاسخ: __installCb(status) → started | need-permission | missing-file | error:... */
+        @JavascriptInterface
+        public void installApk(final String path) {
+            main.post(() -> {
+                try {
+                    if (!getPackageManager().canRequestPackageInstalls()) {
+                        try {
+                            startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                    Uri.parse("package:" + getPackageName())));
+                            toastMain("به فینوا اجازه «نصب از منابع ناشناس» بده و دوباره تلاش کن");
+                        } catch (Exception e2) {
+                            try { startActivity(new Intent(Settings.ACTION_APPLICATION_SETTINGS)); } catch (Exception ignored) {}
+                        }
+                        js("window.__installCb && window.__installCb('need-permission')");
+                        return;
+                    }
+                    File f = new File(path);
+                    if (!f.exists() || f.length() == 0) {
+                        js("window.__installCb && window.__installCb('missing-file')");
+                        return;
+                    }
+                    Uri uri = Uri.parse("content://com.finova.money.files/" + Uri.encode(f.getName()));
+                    Intent i = new Intent(Intent.ACTION_VIEW);
+                    i.setDataAndType(uri, "application/vnd.android.package-archive");
+                    i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(i);
+                    js("window.__installCb && window.__installCb('started')");
+                } catch (Exception e) {
+                    js("window.__installCb && window.__installCb(" + org.json.JSONObject.quote("error:" + e.getMessage()) + ")");
+                }
+            });
+        }
 
         private void js(String call) {
             main.post(() -> web.evaluateJavascript(call, null));

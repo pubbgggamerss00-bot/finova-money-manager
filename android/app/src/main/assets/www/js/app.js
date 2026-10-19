@@ -5,7 +5,8 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.2.0';
+  const APP_VERSION = '1.3.0';
+  window.__APP_VERSION = APP_VERSION; // برای بروزرسان
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -67,6 +68,7 @@ const App = (() => {
       aiBaseURL: '', aiApiKey: '', aiModel: '',   // خالی = سرویس رایگان پیش‌فرض فینوا (بدون کلید)
       manualUSD: '', manualGold: '',
       backup: { auto: true, lastAt: 0 },
+      upd: { lastCheck: 0, dismissed: '' },   // بروزرسان: آخرین بررسی + نسخه‌ای که «بعداً» خورده
       seedDone: false, notifShown: {},
     };
   }
@@ -84,6 +86,8 @@ const App = (() => {
     autoBackup();
     // قیمت‌ها در پس‌زمینه — داشبورد و تب AI پس از رسیدن رفرش شوند
     AI.fetchRates().then(r => { lastRates = r; App.lastRates = r; if (curTab === 'ai' || curTab === 'dashboard') render(curTab); }).catch(() => {});
+    // بروزرسان: چک ساکت نسخه جدید از گیت‌هاب (هر ۱۲ ساعت + دیالوگ/اورلی اجباری)
+    setTimeout(() => { try { Updater.autoCheck(); } catch (e) { console.warn('upd', e); } }, 2600);
   }
 
   /* ───────── محاسبات ───────── */
@@ -402,6 +406,7 @@ const App = (() => {
     if (tab === 'analytics') renderAnalyticsCharts();
     if (tab === 'ai') bindAIScreen();
     if (tab === 'challenge') bindChallenge();
+    if (tab === 'settings') { try { Updater.renderSettingsArea(); } catch (e) { console.warn('upd area', e); } }
   }
 
   /* ── داشبورد ── */
@@ -984,6 +989,12 @@ const App = (() => {
       <div class="card-title">🏷️ دسته‌ها و کیف پول‌ها</div>
       <div class="btn-row"><button class="btn ghost" id="addCatBtn">＋ دسته جدید</button><button class="btn ghost" id="addWalletBtn">＋ کیف پول جدید</button></div>
       <div class="list" style="margin-top:10px">${categories.map(c => `<div class="row-item"><div class="row-ico">${c.icon}</div><div class="row-main"><div class="t">${esc(c.name)}</div><div class="s">${c.type === 'income' ? 'درآمد' : c.essential ? 'هزینه ضروری' : 'هزینه'} </div></div></div>`).join('')}</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🔄 بروزرسانی برنامه <span class="ai-badge on" id="updBadge">نسخه ${faDigits(APP_VERSION)}</span></div>
+      <div id="updArea"><div class="hint" style="text-align:center">برای بررسی نسخه جدید از گیت‌هاب، دکمه زیر را بزن</div>
+        <button class="btn full" id="checkUpdBtn" style="margin-top:8px">🔄 بررسی بروزرسانی</button>
+      </div>
     </div>
     <div class="card">
       <div class="card-title">ℹ️ درباره فینوا</div>

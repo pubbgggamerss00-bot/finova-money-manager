@@ -338,3 +338,49 @@ body.light .hero-chip{background:var(--card2)}
 @media (min-width:1024px){
   .view{max-width:860px}
 }
+
+/* ═══════════ بروزرسان (Updater) ═══════════ */
+.upd-loading{display:flex; align-items:center; justify-content:center; gap:10px; padding:10px 0; color:var(--txt2); font-size:12.5px}
+.spin{width:24px; height:24px; border:3px solid var(--line2); border-top-color:var(--pri2); border-radius:50%; animation:spin .8s linear infinite; flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.upd-vers{display:flex; align-items:center; justify-content:center; gap:12px; margin:10px 0}
+.uv-box{background:var(--bg2); border:1px solid var(--line); border-radius:var(--r-sm); padding:8px 16px; text-align:center; min-width:86px}
+.uv-box small{display:block; color:var(--txt3); font-size:10px; margin-bottom:2px}
+.uv-box b{font-size:16px}
+.uv-box.new{border-color:var(--pri); box-shadow:var(--glow)}
+.uv-box.new b{color:var(--pri2)}
+.uv-arrow{color:var(--txt3); font-size:18px}
+
+.upd-log{background:var(--bg2); border:1px solid var(--line); border-radius:var(--r-sm); padding:10px 12px; max-height:200px; overflow-y:auto; font-size:12px; line-height:2; color:var(--txt2)}
+.upd-log ul{margin:0; padding-right:18px; padding-left:0}
+.upd-log li{margin-bottom:4px}
+.upd-log li::marker{color:var(--pri2)}
+.upd-log strong{color:var(--txt)}
+.upd-line{margin-bottom:2px}
+
+.upd-avail .upd-log, .upd-modal .upd-log, .force-card .upd-log{margin-top:6px}
+.upd-ok{color:var(--ok2); font-size:13px; font-weight:700; text-align:center; padding:6px 0}
+.upd-err{color:var(--bad2); font-size:12px; text-align:center; padding:8px; background:rgba(239,68,68,.08); border:1px solid rgba(239,68,68,.25); border-radius:var(--r-sm); line-height:1.9}
+
+.dl-progress{height:10px; background:var(--bg2); border:1px solid var(--line); border-radius:999px; overflow:hidden; margin:12px 0 6px}
+.dl-fill{height:100%; width:0%; background:var(--grad-neon); border-radius:999px; transition:width .35s ease; box-shadow:var(--glow)}
+.dl-meta{display:flex; justify-content:space-between; font-size:11px; color:var(--txt3)}
+.dl-bytes{font-size:11px; color:var(--txt3)}
+
+.upd-dialog{z-index:200}
+.upd-modal{max-width:420px; width:calc(100% - 32px)}
+.upd-hero{text-align:center; padding-top:4px}
+.upd-hero-ico{width:62px; height:62px; margin:0 auto 8px; border-radius:20px; background:var(--grad-neon); display:flex; align-items:center; justify-content:center; font-size:30px; box-shadow:var(--glow), var(--glow-acc)}
+.upd-hero h3{margin:0 0 4px; font-size:17px}
+.upd-hero .fu-sub{color:var(--txt2); font-size:11.5px; margin:0}
+
+.upd-perm{background:rgba(245,158,11,.07); border:1px solid rgba(245,158,11,.3); border-radius:var(--r-sm); padding:12px; font-size:12px; line-height:2}
+.upd-perm b{color:var(--warn2)}
+.upd-perm-steps{color:var(--txt2); margin:6px 0 10px}
+
+/* بروزرسانی اجباری — اورلی تمام‌صفحه غیرقابل بستن */
+.force-upd{position:fixed; inset:0; z-index:9999; background:color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); display:flex; align-items:center; justify-content:center; padding:18px; padding-bottom:calc(18px + env(safe-area-inset-bottom))}
+.force-card{background:var(--card); border:1px solid var(--line2); border-radius:var(--r); box-shadow:var(--shadow); padding:20px 16px; max-width:420px; width:100%; max-height:calc(100vh - 40px); overflow-y:auto; animation:slideUp .35s ease}
+.force-card .fu-text{font-size:13px; line-height:2.1; color:var(--txt2); text-align:center; margin:4px 0 10px}
+.force-card .fu-text b{color:var(--pri2)}

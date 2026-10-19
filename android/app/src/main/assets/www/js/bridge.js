@@ -134,5 +134,43 @@ const Bridge = (() => {
     if (native && native.exitApp) { try { native.exitApp(); } catch (e) {} }
   }
 
-  return { hasNative, http, showNotification, requestNotifPermission, hasNotifPermission, biometricAuth, canBiometric, saveFile, shareFile, shareText, vibrate, toast, updateWidget, version, exitApp };
+  /* ── بروزرسانی: دانلود APK با نوار پیشرفت + نصب ── */
+  function downloadApk(url, onProgress) {
+    return new Promise(resolve => {
+      if (!native || !native.downloadApk) {
+        // حالت وب: باز کردن مستقیم لینک (فقط پیش‌نمایش مرورگر)
+        try {
+          const a = document.createElement('a');
+          a.href = String(url); a.target = '_blank'; a.rel = 'noopener';
+          document.body.appendChild(a); a.click(); a.remove();
+          resolve({ ok: true, web: true });
+        } catch (e) { resolve({ ok: false, msg: String(e) }); }
+        return;
+      }
+      const id = 'dl' + (++reqSeq);
+      window.__dlCb = (cbId, phase, a, b) => {
+        if (String(cbId) !== id) return;
+        if (phase === 'progress') { try { onProgress && onProgress(+a || 0, +b || 0); } catch (e) {} }
+        else if (phase === 'done') resolve({ ok: true, path: String(a || '') });
+        else resolve({ ok: false, msg: String(a || 'download-failed') });
+      };
+      try { native.downloadApk(id, String(url)); }
+      catch (e) { resolve({ ok: false, msg: String(e) }); }
+      // تایماوت ایمنی (۱۰ دقیقه)
+      setTimeout(() => resolve({ ok: false, msg: 'timeout' }), 600000);
+    });
+  }
+  function installApk(path) {
+    return new Promise(resolve => {
+      if (!native || !native.installApk) { resolve({ ok: false, status: 'no-native' }); return; }
+      let done = false;
+      window.__installCb = st => { done = true; resolve({ ok: st === 'started', status: String(st) }); };
+      try { native.installApk(String(path)); }
+      catch (e) { resolve({ ok: false, status: 'error:' + String(e) }); return; }
+      // اگر جاوا callback نداد (بعضی رابط‌ها)، بعد از ۵ ثانیه فرض کن باز شده
+      setTimeout(() => { if (!done) resolve({ ok: true, status: 'started' }); }, 5000);
+    });
+  }
+
+  return { hasNative, http, showNotification, requestNotifPermission, hasNotifPermission, biometricAuth, canBiometric, saveFile, shareFile, shareText, vibrate, toast, updateWidget, version, exitApp, downloadApk, installApk };
 })();
