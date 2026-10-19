@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.3.0';
+  const APP_VERSION = '1.3.1';
   window.__APP_VERSION = APP_VERSION; // برای بروزرسان
 
   const DEF_CATEGORIES = [
@@ -997,7 +997,8 @@ const App = (() => {
       </div>
     </div>
     <div class="card">
-      <div class="card-title">ℹ️ درباره فینوا</div>
+      <img src="img/logo.png" alt="فینوا" style="display:block;width:64px;height:64px;margin:2px auto 10px;filter:drop-shadow(0 0 14px rgba(34,211,238,.35))">
+      <div class="card-title" style="text-align:center">ℹ️ درباره فینوا</div>
       <p style="font-size:12.5px;color:var(--txt2);line-height:2;margin:0">فینوا نسخه ${faDigits(APP_VERSION)} (${esc(Bridge.version())}) — مدیریت مالی هوشمند، کاملاً آفلاین و محلی.<br>داده‌هایت فقط روی همین گوشی ذخیره می‌شوند. 🔒<br>تقویم جلالی • تومان • RTL کامل</p>
     </div>`;
   }
@@ -1137,21 +1138,32 @@ const App = (() => {
     });
   }
   function pickFileAndRestore() {
+    // در اپ اندروید: انتخابگر بومی SAF (مطمئن‌ترین راه در WebView)
+    if (Bridge.hasNative() && typeof Bridge.pickBackupFile === 'function') {
+      Bridge.pickBackupFile().then(text => {
+        if (!text) { UI.toast('فایلی انتخاب نشد', 'bad'); return; }
+        handleBackupText(String(text));
+      });
+      return;
+    }
+    // مرورگر / پیش‌نمایش
     const inp = document.createElement('input');
     inp.type = 'file'; inp.accept = '.json,.enc,application/json';
     inp.onchange = async () => {
       const f = inp.files[0]; if (!f) return;
-      let text = await f.text();
-      try {
-        if (text.startsWith('FENC1:')) {
-          const pass = await UI.prompt('رمز فایل', 'رمز پشتیبان را وارد کنید:', 'password');
-          if (!pass) return;
-          text = await decryptText(text, pass);
-        }
-        await importPayload(text);
-      } catch (e) { UI.toast('بازگشایی ناموفق: رمز اشتباه یا فایل خراب است', 'bad'); }
+      handleBackupText(await f.text());
     };
     inp.click();
+  }
+  async function handleBackupText(text) {
+    try {
+      if (text.startsWith('FENC1:')) {
+        const pass = await UI.prompt('رمز فایل', 'رمز پشتیبان را وارد کنید:', 'password');
+        if (!pass) return;
+        text = await decryptText(text, pass);
+      }
+      await importPayload(text);
+    } catch (e) { UI.toast('بازگشایی ناموفق: رمز اشتباه یا فایل خراب است', 'bad'); }
   }
 
   /* ── شیت ثبت جدید ── */

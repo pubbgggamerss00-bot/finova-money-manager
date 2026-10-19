@@ -179,7 +179,7 @@ const Updater = (() => {
       case 'downloading':
         return `<div class="upd-dling"><div class="upd-loading"><div class="spin"></div><span>در حال دانلود نسخه ${fa(lastInfo ? lastInfo.version : '')}…</span></div>${progressHTML(dlProg.rec, dlProg.tot)}</div>`;
       case 'downloaded':
-        return `<div class="upd-done"><div class="upd-ok">✅ دانلود کامل شد</div><button class="btn full" id="updInstBtn">📥 نصب برنامه</button></div>`;
+        return `<div class="upd-done"><div class="upd-ok">✅ دانلود کامل شد</div><button class="btn full" id="updInstBtn">📥 نصب برنامه</button><div class="hint" style="text-align:center;margin-top:8px">💡 اگر Play Protect هشدار داد، روی <b>Install anyway</b> بزن</div></div>`;
       case 'error':
         return `<div class="upd-err">⚠️ ${esc(lastError)}</div><button class="btn full" id="checkUpdBtn" style="margin-top:8px">تلاش مجدد</button>`;
       case 'uptodate':
@@ -321,7 +321,8 @@ const Updater = (() => {
     } else if (state === 'downloaded') {
       zone.innerHTML = `<div class="upd-ok">✅ دانلود کامل شد — در حال باز کردن نصب…</div>`;
     } else if (state === 'installing') {
-      zone.innerHTML = `<div class="upd-loading"><div class="spin"></div><span>در حال باز کردن صفحه نصب…</span></div>`;
+      zone.innerHTML = `<div class="upd-loading"><div class="spin"></div><span>در حال باز کردن صفحه نصب…</span></div>
+        <div class="hint" style="text-align:center;margin-top:10px">💡 اگر Google Play Protect هشدار «App blocked» داد، روی <b>Install anyway</b> بزن</div>`;
     } else if (state === 'need-permission') {
       zone.innerHTML = `
         <div class="upd-perm">

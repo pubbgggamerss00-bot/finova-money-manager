@@ -25,6 +25,8 @@ import android.provider.MediaStore;
 import android.provider.Settings;
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -57,6 +59,9 @@ public class MainActivity extends Activity {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService pool = Executors.newCachedThreadPool();
     private int serverPort = 18080;
+    private ValueCallback<Uri[]> fileCallback;
+    private static final int REQ_FILE_CHOOSER = 5150;
+    private static final int REQ_BACKUP_PICK = 6161;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -91,6 +96,22 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
+        // بدون این WebChromeClient، <input type="file"> در WebView هیچ‌کاری نمی‌کند
+        // (ریشه باگ «بازیابی از فایل»)
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView wv, ValueCallback<Uri[]> cb, FileChooserParams params) {
+                if (fileCallback != null) { try { fileCallback.onReceiveValue(null); } catch (Exception ignored) {} }
+                fileCallback = cb;
+                try {
+                    Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+                    i.addCategory(Intent.CATEGORY_OPENABLE);
+                    i.setType("*/*"); // هر فایل پشتیبانی (.json / .enc) قابل انتخاب باشد
+                    startActivityForResult(Intent.createChooser(i, "انتخاب فایل پشتیبان"), REQ_FILE_CHOOSER);
+                    return true;
+                } catch (Exception e) { fileCallback = null; return false; }
+            }
+        });
         setContentView(web);
         web.loadUrl("http://127.0.0.1:" + serverPort + "/index.html");
     }
@@ -98,6 +119,28 @@ public class MainActivity extends Activity {
     @Override
     public void onBackPressed() {
         main.post(() -> web.evaluateJavascript("window.__androidBack && window.__androidBack();", null));
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQ_FILE_CHOOSER) {
+            Uri[] res = null;
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) res = new Uri[]{ data.getData() };
+            if (fileCallback != null) { try { fileCallback.onReceiveValue(res); } catch (Exception ignored) {} fileCallback = null; }
+            return;
+        }
+        if (requestCode == REQ_BACKUP_PICK) {
+            final Uri uri = (resultCode == RESULT_OK && data != null) ? data.getData() : null;
+            if (uri == null) { js("window.__fileCb && window.__fileCb(null)"); return; }
+            pool.execute(() -> {
+                String text = "";
+                try { text = readAll(getContentResolver().openInputStream(uri)); } catch (Exception ignored) { text = ""; }
+                final String out = text;
+                js("window.__fileCb && window.__fileCb(" + org.json.JSONObject.quote(out) + ")");
+            });
+            return;
+        }
+        super.onActivityResult(requestCode, resultCode, data);
     }
 
     @Override
@@ -235,6 +278,19 @@ public class MainActivity extends Activity {
                     } catch (Exception ignored) {}
                 }
                 js("__bioCb(false,'unsupported')");
+            });
+        }
+
+        /** انتخابگر بومی فایل پشتیبان — پاسخ: __fileCb(text) | __fileCb(null) لغو */
+        @JavascriptInterface
+        public void pickBackupFile() {
+            main.post(() -> {
+                try {
+                    Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    i.addCategory(Intent.CATEGORY_OPENABLE);
+                    i.setType("*/*");
+                    startActivityForResult(i, REQ_BACKUP_PICK);
+                } catch (Exception e) { js("window.__fileCb && window.__fileCb(null)"); }
             });
         }
 
@@ -422,16 +478,37 @@ public class MainActivity extends Activity {
                         js("window.__installCb && window.__installCb('missing-file')");
                         return;
                     }
-                    Uri uri = Uri.parse("content://com.finova.money.files/" + Uri.encode(f.getName()));
-                    Intent i = new Intent(Intent.ACTION_VIEW);
-                    i.setDataAndType(uri, "application/vnd.android.package-archive");
-                    i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(i);
-                    js("window.__installCb && window.__installCb('started')");
+                    // راهنمای Play Protect — فقط بار اول (بعد از آن مستقیم نصب)
+                    android.content.SharedPreferences sp = getSharedPreferences("finova_prefs", MODE_PRIVATE);
+                    if (!sp.getBoolean("pp_tip_shown", false)) {
+                        sp.edit().putBoolean("pp_tip_shown", true).apply();
+                        new android.app.AlertDialog.Builder(MainActivity.this)
+                                .setTitle("نکته مهم برای نصب")
+                                .setMessage("پیش از باز شدن نصب‌کننده، این را بدان:\n\nاگر Google Play Protect پیام \"App blocked to protect your device\" نشان داد، روی Install anyway بزنید.\n\nاین هشدار برای همه اپ‌های نصب‌شده از خارج از گوگل‌پلی است، نه به‌خاطر خطرناک بودن فینوا. فینوا کاملاً محلی است و هیچ داده‌ای از گوشی شما ارسال نمی‌کند.")
+                                .setPositiveButton("ادامه نصب", (d, w) -> launchInstaller(f))
+                                .setNegativeButton("انصراف", (d, w) -> js("window.__installCb && window.__installCb('cancelled')"))
+                                .setOnCancelListener(d -> js("window.__installCb && window.__installCb('cancelled')"))
+                                .show();
+                        return;
+                    }
+                    launchInstaller(f);
                 } catch (Exception e) {
                     js("window.__installCb && window.__installCb(" + org.json.JSONObject.quote("error:" + e.getMessage()) + ")");
                 }
             });
+        }
+
+        private void launchInstaller(File f) {
+            try {
+                Uri uri = Uri.parse("content://com.finova.money.files/" + Uri.encode(f.getName()));
+                Intent i = new Intent(Intent.ACTION_VIEW);
+                i.setDataAndType(uri, "application/vnd.android.package-archive");
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+                js("window.__installCb && window.__installCb('started')");
+            } catch (Exception e) {
+                js("window.__installCb && window.__installCb(" + org.json.JSONObject.quote("error:" + e.getMessage()) + ")");
+            }
         }
 
         private void js(String call) {
@@ -537,6 +614,11 @@ public class MainActivity extends Activity {
         }
 
         void stop() { running = false; try { socket.close(); } catch (Exception ignored) {} }
+    }
+
+    /** ارسال JS از خود اکتیویتی (نسخه کلاس داخلی Bridge جداگانه دارد) */
+    private void js(String call) {
+        main.post(() -> web.evaluateJavascript(call, null));
     }
 
     private String readAll(InputStream is) {

@@ -172,5 +172,15 @@ const Bridge = (() => {
     });
   }
 
-  return { hasNative, http, showNotification, requestNotifPermission, hasNotifPermission, biometricAuth, canBiometric, saveFile, shareFile, shareText, vibrate, toast, updateWidget, version, exitApp, downloadApk, installApk };
+  /* ── بازیابی پشتیبان: انتخابگر بومی فایل (الزامی در WebView) ──
+     پاسخ جاوا: __fileCb(text) | __fileCb(null) لغو */
+  function pickBackupFile() {
+    return new Promise(resolve => {
+      if (!native || !native.pickBackupFile) { resolve(null); return; }
+      window.__fileCb = text => resolve(text);
+      try { native.pickBackupFile(); } catch (e) { resolve(null); }
+    });
+  }
+
+  return { hasNative, http, showNotification, requestNotifPermission, hasNotifPermission, biometricAuth, canBiometric, saveFile, shareFile, shareText, vibrate, toast, updateWidget, version, exitApp, downloadApk, installApk, pickBackupFile };
 })();
