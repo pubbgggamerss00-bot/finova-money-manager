@@ -3,11 +3,135 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#0b1120">
+<meta name="theme-color" content="#070C18">
 <title>فینوا | مدیریت هوشمند مالی</title>
+<link rel="preload" href="fonts/Vazirmatn-Black.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="css/app.css">
+<style>
+/* ═════════ اسپلش لودینگ فینوا — استایل مستقل برای پینت فوری ═════════ */
+@font-face{font-family:'Vazirmatn';src:url('fonts/Vazirmatn-Black.woff2') format('woff2');font-weight:900;font-display:swap}
+#splash{position:fixed;inset:0;z-index:99999;background:#070C18;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;transition:opacity .55s ease,transform .55s ease,visibility .55s;font-family:'Vazirmatn',Vazirmatn,Tahoma,sans-serif}
+#splash.out{opacity:0;transform:scale(1.045);pointer-events:none}
+.sp-bg{position:absolute;inset:0;background:
+  radial-gradient(520px 320px at 22% 16%, rgba(6,182,212,.17), transparent 62%),
+  radial-gradient(560px 340px at 80% 82%, rgba(217,70,239,.14), transparent 62%),
+  radial-gradient(320px 210px at 86% 10%, rgba(217,70,239,.10), transparent 65%);
+  animation:spGlow 4.5s ease-in-out infinite alternate}
+@keyframes spGlow{from{opacity:.72}to{opacity:1}}
+.sp-center{position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;transform:translateY(-4vh);transition:.5s ease}
+#splash.out .sp-center{transform:translateY(-9vh);opacity:0}
+.sp-orb{position:relative;width:126px;height:126px;display:grid;place-items:center}
+.sp-orb::before{content:"";position:absolute;inset:-16px;border-radius:50%;
+  background:conic-gradient(from 0deg,transparent 0 60%,rgba(6,182,212,.95) 82%,rgba(217,70,239,.95) 100%);
+  -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 3.5px),#000 calc(100% - 2.5px));
+  mask:radial-gradient(farthest-side,transparent calc(100% - 3.5px),#000 calc(100% - 2.5px));
+  animation:spSpin 1.7s linear infinite;filter:drop-shadow(0 0 8px rgba(34,211,238,.5))}
+@keyframes spSpin{to{transform:rotate(360deg)}}
+.sp-ring{position:absolute;inset:2px;border-radius:50%;border:2px solid rgba(34,211,238,.5);animation:spPulse 2.2s ease-out infinite;pointer-events:none}
+.sp-ring.r2{border-color:rgba(217,70,239,.45);animation-delay:1.1s}
+@keyframes spPulse{0%{transform:scale(.8);opacity:.9}100%{transform:scale(1.65);opacity:0}}
+.sp-logo{width:94px;height:94px;border-radius:26px;display:grid;place-items:center;overflow:hidden;
+  background:#0B1120;border:1.5px solid rgba(49,68,110,.9);
+  box-shadow:0 0 26px rgba(34,211,238,.28),0 0 62px rgba(217,70,239,.15),inset 0 0 18px rgba(6,182,212,.10);
+  animation:spBreathe 2.4s ease-in-out infinite}
+.sp-logo img{width:78%;height:78%;object-fit:contain;display:block}
+@keyframes spBreathe{0%,100%{transform:scale(1)}50%{transform:scale(1.07)}}
+.sp-title{margin:22px 0 0;font-size:36px;font-weight:900;letter-spacing:1px;line-height:1;
+  background:linear-gradient(90deg,#22d3ee,#e879f9,#22d3ee);background-size:220% 100%;
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  animation:spShimmer 2.8s linear infinite}
+@keyframes spShimmer{to{background-position:-220% 0}}
+.sp-tag{margin:10px 0 0;font-size:12.5px;color:#94a7c4;letter-spacing:.4px}
+.sp-bottom{position:absolute;bottom:calc(7vh + env(safe-area-inset-bottom));z-index:2;display:flex;flex-direction:column;align-items:center;gap:10px;width:min(72%,272px)}
+.sp-status{font-size:12px;color:#94a7c4;min-height:18px;transition:opacity .18s;text-align:center}
+.sp-track{width:100%;height:5px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden;position:relative}
+.sp-fill{height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,#06b6d4,#d946ef);
+  box-shadow:0 0 12px rgba(34,211,238,.65);transition:width .5s cubic-bezier(.22,1,.36,1);position:relative;overflow:hidden}
+.sp-fill::after{content:"";position:absolute;top:0;bottom:0;width:46px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent);
+  animation:spSweep 1.5s linear infinite}
+@keyframes spSweep{from{left:-52px}to{left:110%}}
+.sp-pct{font-size:11px;color:#5f7396;direction:ltr}
+.sp-ver{position:absolute;bottom:calc(2.4vh + env(safe-area-inset-bottom));z-index:2;font-size:10.5px;color:#3d4f70;letter-spacing:.5px}
+.sp-pt{position:absolute;bottom:-14px;border-radius:50%;opacity:0;z-index:1;animation:spRise linear infinite}
+@keyframes spRise{0%{transform:translateY(0) scale(1);opacity:0}12%{opacity:.7}100%{transform:translateY(-88vh) scale(.35);opacity:0}}
+.sp-pt:nth-of-type(1){left:7%;width:5px;height:5px;background:#22d3ee;animation-duration:7s;animation-delay:0s}
+.sp-pt:nth-of-type(2){left:21%;width:3px;height:3px;background:#e879f9;animation-duration:9s;animation-delay:1.2s}
+.sp-pt:nth-of-type(3){left:36%;width:4px;height:4px;background:#fbbf24;animation-duration:8s;animation-delay:2.4s}
+.sp-pt:nth-of-type(4){left:51%;width:3px;height:3px;background:#22d3ee;animation-duration:10s;animation-delay:.6s}
+.sp-pt:nth-of-type(5){left:64%;width:5px;height:5px;background:#e879f9;animation-duration:7.5s;animation-delay:1.8s}
+.sp-pt:nth-of-type(6){left:78%;width:3px;height:3px;background:#34d399;animation-duration:9.5s;animation-delay:.2s}
+.sp-pt:nth-of-type(7){left:90%;width:4px;height:4px;background:#22d3ee;animation-duration:8.5s;animation-delay:3s}
+.sp-pt:nth-of-type(8){left:14%;width:3px;height:3px;background:#fbbf24;animation-duration:11s;animation-delay:4.1s}
+.sp-pt:nth-of-type(9){left:59%;width:4px;height:4px;background:#e879f9;animation-duration:10.5s;animation-delay:3.4s}
+</style>
 </head>
 <body>
+
+<!-- ═════════ اسپلش لودینگ — قبل از همه‌چیز پینت می‌شود ═════════ -->
+<div id="splash" role="status" aria-label="در حال بارگذاری فینوا">
+  <div class="sp-bg"></div>
+  <i class="sp-pt"></i><i class="sp-pt"></i><i class="sp-pt"></i><i class="sp-pt"></i><i class="sp-pt"></i>
+  <i class="sp-pt"></i><i class="sp-pt"></i><i class="sp-pt"></i><i class="sp-pt"></i>
+  <div class="sp-center">
+    <div class="sp-orb">
+      <span class="sp-ring r1"></span><span class="sp-ring r2"></span>
+      <div class="sp-logo"><img src="img/logo.png" alt="فینوا"></div>
+    </div>
+    <h1 class="sp-title">فینوا</h1>
+    <p class="sp-tag">مدیریت هوشمند مالی شخصی</p>
+  </div>
+  <div class="sp-bottom">
+    <div class="sp-status" id="spStatus">در حال آماده‌سازی…</div>
+    <div class="sp-track"><div class="sp-fill" id="spFill"></div></div>
+    <div class="sp-pct" id="spPct">۰٪</div>
+  </div>
+  <div class="sp-ver" id="spVer">نسخه ۱٫۳٫۲</div>
+</div>
+<script>
+/* ── کنترل اسپلش — مستقل و قبل از ماژول‌ها در دسترس ── */
+window.Splash = (function () {
+  var T0 = Date.now(), MIN_MS = 1400, finished = false, lastMsgAt = 0, rot = null, mi = 0;
+  var MSGS = ['در حال آماده‌سازی…', 'باز کردن پایگاه داده امن…', 'بارگذاری تراکنش‌ها…', 'همگام‌سازی تنظیمات…', 'نزدیک به آماده‌سازی…'];
+  function fa(n) { return String(n).replace(/[0-9]/g, function (d) { return '۰۱۲۳۴۵۶۷۸۹'[+d]; }); }
+  function $(id) { return document.getElementById(id); }
+  function swapText(el, txt) {
+    if (!el) return;
+    el.style.opacity = '0';
+    setTimeout(function () { el.textContent = txt; el.style.opacity = '1'; }, 170);
+  }
+  function step(pct, msg) {
+    if (finished) return;
+    var f = $('spFill'), p = $('spPct');
+    if (f) f.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    if (p) p.textContent = fa(Math.round(pct)) + '٪';
+    if (msg) { lastMsgAt = Date.now(); swapText($('spStatus'), msg); }
+  }
+  function done() {
+    if (finished) return; finished = true;
+    if (rot) { clearInterval(rot); rot = null; }
+    var wait = Math.max(0, MIN_MS - (Date.now() - T0));
+    setTimeout(function () {
+      step(100, 'آماده شد ✓');
+      var sp = $('splash');
+      setTimeout(function () {
+        if (!sp) return;
+        sp.classList.add('out');
+        sp.setAttribute('aria-hidden', 'true');
+        setTimeout(function () { if (sp && sp.parentNode) sp.parentNode.removeChild(sp); }, 640);
+      }, 300);
+    }, wait);
+  }
+  setTimeout(done, 9000); /* ضامن ایمنی: حتی اگر چیزی هنگ کرد، اسپلش می‌رود */
+  rot = setInterval(function () {
+    if (finished || Date.now() - lastMsgAt < 1900) return;
+    mi = (mi + 1) % MSGS.length;
+    swapText($('spStatus'), MSGS[mi]);
+  }, 2100);
+  return { step: step, done: done };
+})();
+</script>
+
 <div id="appRoot" class="app-root">
 
   <!-- صفحه قفل -->

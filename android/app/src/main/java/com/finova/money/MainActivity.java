@@ -83,7 +83,7 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         s.setTextZoom(100);
-        web.setBackgroundColor(0xFF0B1120);
+        web.setBackgroundColor(0xFF070C18); // هم‌رنگ اسپلش → بدون پرش رنگی هنگام پینت اول
         web.addJavascriptInterface(new Bridge(), "Finova");
         web.setWebViewClient(new WebViewClient() {
             @Override

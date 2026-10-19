@@ -9,4 +9,5 @@
     <color name="txt_dim">#94A7C4</color>
     <color name="ok_green">#10B981</color>
     <color name="ic_launcher_background">#070C18</color>
+    <color name="splash_bg">#070C18</color>
 </resources>

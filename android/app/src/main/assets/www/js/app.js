@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.3.1';
+  const APP_VERSION = '1.3.2';
   window.__APP_VERSION = APP_VERSION; // برای بروزرسان
 
   const DEF_CATEGORIES = [
@@ -31,18 +31,22 @@ const App = (() => {
   /* ───────── راه‌اندازی ───────── */
   async function boot() {
     bindChrome();
+    try { Splash.step(8, 'راه‌اندازی فینوا…'); } catch (e) {}
     try {
       await Store.open();
     } catch (e) {
       console.error('DB open failed:', e);
+      try { Splash.done(); } catch (e2) {}
       document.getElementById('view').innerHTML =
         '<div class="empty" style="margin-top:60px"><div class="big">⚠️</div><b>خطا در باز کردن پایگاه داده</b><br><br>' +
         '<button class="btn" onclick="location.reload()">تلاش مجدد</button></div>';
       return;
     }
+    try { Splash.step(32, 'باز کردن پایگاه داده…'); } catch (e) {}
     try { await Store.migrateLegacyLocalStorage(); } catch (e) { console.warn('legacy migrate', e); }
     try { state = (await Store.get('kv', 'settings')) || {}; } catch (e) { state = {}; }
     if (state.v !== 2 || !state.lock) state = Object.assign(defaultState(), state, { v: 2 });
+    try { Splash.step(56, 'بارگذاری تراکنش‌ها…'); } catch (e) {}
     try { categories = (await Store.all('categories')) || []; } catch (e) { categories = []; }
     if (!categories.length) { categories = DEF_CATEGORIES.slice(); try { await Store.bulkPut('categories', categories); } catch (e) {} }
     try { wallets = (await Store.all('wallets')) || []; } catch (e) { wallets = []; }
@@ -52,8 +56,11 @@ const App = (() => {
     try { budgets = (await Store.all('budgets')) || []; } catch (e) { budgets = []; }
     try { goals = ((await Store.all('goals')) || []).map(normGoal); } catch (e) { goals = []; }
 
+    try { Splash.step(86, 'آماده‌سازی رابط کاربری…'); } catch (e) {}
     applyTheme();
     document.getElementById('topDate').textContent = todayLabel();
+    try { const vEl = document.getElementById('spVer'); if (vEl) vEl.textContent = 'نسخه ' + faDigits(APP_VERSION).replace('.', '٫'); } catch (e) {}
+    try { Splash.done(); } catch (e) {}
 
     // قفل
     if (state.lock && state.lock.enabled) { showLock(); } else { unlocked = true; afterUnlock(); }
