@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- اسپلش بومی: از لحظه لمس آیکون، لوگوی فینوا روی پس‌زمینه برند دیده می‌شود
-     (پنجره پیش‌نمایش سرد → وب‌اسپلش با همان رنگ پس‌زمینه → انتقال بی‌درز) -->
+     (پنجره پیش‌نمایش سرد → وب‌اسپلش با همان رنگ پس‌زمینه → انتقال بی‌درز)
+     ⚠️ نکته کرش: تگ <bitmap> باید به یک PNG واقعی اشاره کند — آیکون تطبیقی
+     (@mipmap/ic_launcher که XML است) اینجا decode نمی‌شود و InflateException
+     → کرش فوری در باز شدن برنامه می‌دهد (باگ نسخه ۱.۳.۲) -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/splash_bg"/>
     <item android:gravity="center">
         <bitmap
-            android:src="@mipmap/ic_launcher"
+            android:src="@drawable/splash_logo"
             android:gravity="center"/>
     </item>
 </layer-list>

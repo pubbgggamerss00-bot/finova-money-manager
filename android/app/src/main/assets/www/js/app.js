@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.3.2';
+  const APP_VERSION = '1.3.3';
   window.__APP_VERSION = APP_VERSION; // برای بروزرسان
 
   const DEF_CATEGORIES = [
