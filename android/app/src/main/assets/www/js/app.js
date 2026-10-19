@@ -5,20 +5,21 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
+  const APP_VERSION = '1.1.0';
 
   const DEF_CATEGORIES = [
-    { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment' },
-    { id: 'c_inst', name: 'قسط وام', icon: '🏦', essential: true, type: 'installment' },
-    { id: 'c_food', name: 'خوراک', icon: '🍚', essential: true, type: 'expense' },
-    { id: 'c_util', name: 'قبض و خدمات', icon: '💡', essential: true, type: 'expense' },
-    { id: 'c_transport', name: 'حمل‌ونقل', icon: '🚌', essential: true, type: 'expense' },
-    { id: 'c_health', name: 'درمان', icon: '💊', essential: true, type: 'expense' },
-    { id: 'c_edu', name: 'آموزش', icon: '📚', essential: false, type: 'expense' },
-    { id: 'c_fun', name: 'تفریح', icon: '🎮', essential: false, type: 'expense' },
-    { id: 'c_cloth', name: 'پوشاک', icon: '👕', essential: false, type: 'expense' },
-    { id: 'c_shop', name: 'خرید متفرقه', icon: '🛍️', essential: false, type: 'expense' },
-    { id: 'c_salary', name: 'حقوق', icon: '💼', type: 'income' },
-    { id: 'c_side', name: 'درآمد جانبی', icon: '🧰', type: 'income' },
+    { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
+    { id: 'c_inst', name: 'قسط وام', icon: '🏦', essential: true, type: 'installment', color: '#38bdf8' },
+    { id: 'c_food', name: 'خوراک', icon: '🍚', essential: true, type: 'expense', color: '#34d399' },
+    { id: 'c_util', name: 'قبض و خدمات', icon: '💡', essential: true, type: 'expense', color: '#fbbf24' },
+    { id: 'c_transport', name: 'حمل‌ونقل', icon: '🚌', essential: true, type: 'expense', color: '#22d3ee' },
+    { id: 'c_health', name: 'درمان', icon: '💊', essential: true, type: 'expense', color: '#f87171' },
+    { id: 'c_edu', name: 'آموزش', icon: '📚', essential: false, type: 'expense', color: '#a78bfa' },
+    { id: 'c_fun', name: 'تفریح', icon: '🎮', essential: false, type: 'expense', color: '#e879f9' },
+    { id: 'c_cloth', name: 'پوشاک', icon: '👕', essential: false, type: 'expense', color: '#fb923c' },
+    { id: 'c_shop', name: 'خرید متفرقه', icon: '🛍️', essential: false, type: 'expense', color: '#4ade80' },
+    { id: 'c_salary', name: 'حقوق', icon: '💼', type: 'income', color: '#34d399' },
+    { id: 'c_side', name: 'درآمد جانبی', icon: '🧰', type: 'income', color: '#22d3ee' },
   ];
   const DEF_WALLETS = [
     { id: 'w_main', name: 'کیف پول اصلی', kind: 'cash' },
@@ -63,7 +64,7 @@ const App = (() => {
       lock: { enabled: false, pinHash: '', salt: '' },
       strict: { enabled: false, pct: 20 },
       notify: { days: [7, 3, 1], budgetAlert: true, balanceAlert: true },
-      aiBaseURL: 'https://api.openai.com/v1', aiApiKey: '', aiModel: 'gpt-4o-mini',
+      aiBaseURL: '', aiApiKey: '', aiModel: '',   // خالی = سرویس رایگان پیش‌فرض فینوا (بدون کلید)
       manualUSD: '', manualGold: '',
       backup: { auto: true, lastAt: 0 },
       seedDone: false, notifShown: {},
@@ -81,8 +82,8 @@ const App = (() => {
       jDateLabel(jKey(jToday()))
     );
     autoBackup();
-    // قیمت‌ها در پس‌زمینه
-    AI.fetchRates().then(r => { lastRates = r; App.lastRates = r; if (curTab === 'ai') render(curTab); }).catch(() => {});
+    // قیمت‌ها در پس‌زمینه — داشبورد و تب AI پس از رسیدن رفرش شوند
+    AI.fetchRates().then(r => { lastRates = r; App.lastRates = r; if (curTab === 'ai' || curTab === 'dashboard') render(curTab); }).catch(() => {});
   }
 
   /* ───────── محاسبات ───────── */
@@ -137,22 +138,30 @@ const App = (() => {
     return d * 10 + (t.essential ? -100 : 0) + (+t.priority || 3);
   }
 
-  /* ───────── تولید خودکار اقساط تکرارشونده (ضدتکرار) ───────── */
+  /* ───────── تولید خودکار اقساط تکرارشونده (ضدتکرار + احترام به تعداد قسط مانده) ───────── */
   function generateRecurring() {
     const t = jToday();
     let created = 0;
     rules.filter(r => r.active).forEach(r => {
       const createdMk = r.createdMk || jMonthKey(t);
-      for (let back = 1; back >= 0; back--) { // ماه قبل + این ماه (پوشش غیبت) فقط برای قوانین قدیمی
-        const mm = addJMonths(t, -back);
+      const createdD = r.createdD || 1;
+      const cnt0 = txs.filter(x => x.ruleId === r.id).length;
+      let made = 0;
+      // ماه قبل + این ماه + ماه بعد (پوشش غیبت + نمایش اقساط پیش‌رو)
+      for (let off = 1; off >= -1; off--) {
+        const mm = addJMonths(t, -off);
         if (jMonthKey(mm) < createdMk) continue; // قبل از ساخت قانون تولید نشود
-        const maxD = Jalali.monthLength(mm.jy, mm.jm);
-        const day = Math.min(r.day, maxD);
         const mk = jMonthKey(mm);
         const key = r.id + '@' + mk;
-        if (r.lastKey === key) continue;
+        // یک ماه هرگز دوبار تولید نمی‌شود (حتی اگر تراکنشش حذف شده باشد)
+        if (r.lastKey && key <= r.lastKey) continue;
+        if (r.remainingMonths > 0 && cnt0 + made >= r.remainingMonths) break; // سقف تعداد قسط
         const exists = txs.some(x => x.ruleId === r.id && x.jdate.startsWith(mk));
         if (exists) { r.lastKey = key; continue; }
+        // قسطی که روزش قبل از روزِ ساختِ قانون است تولید نمی‌شود (رفع باگ «قسط معوق لحظه ساخت»)
+        const maxD = Jalali.monthLength(mm.jy, mm.jm);
+        const day = Math.min(r.day, maxD);
+        if (mk === createdMk && day < createdD) { r.lastKey = key; continue; }
         const due = `${mk}/${String(day).padStart(2, '0')}`;
         txs.push(normTx({
           id: uid('tx'), type: 'installment', title: r.title,
@@ -161,7 +170,7 @@ const App = (() => {
           jdate: due, dueJdate: due, status: 'pending',
           priority: r.priority, essential: r.essential, ruleId: r.id, seq: (r.seq || 0) + 1,
         }));
-        r.lastKey = key; r.seq = (r.seq || 0) + 1; created++;
+        r.lastKey = key; r.seq = (r.seq || 0) + 1; made++; created++;
       }
     });
     if (created) { persist('rules'); persist('transactions'); }
@@ -176,11 +185,14 @@ const App = (() => {
     if (kind === 'categories') await Store.bulkPut('categories', categories);
   }
 
-  /* ───────── اعلان‌ها ───────── */
+  /* ───────── اعلان‌ها (بومی + وب) ───────── */
   async function scheduleNotifications() {
-    if (!Bridge.hasNative()) return;
-    const perm = await Bridge.hasNotifPermission();
-    if (!perm) { await Bridge.requestNotifPermission(); }
+    if (Bridge.hasNative()) {
+      const perm = await Bridge.hasNotifPermission();
+      if (!perm) { await Bridge.requestNotifPermission(); }
+    } else {
+      Bridge.requestNotifPermission(); // مرورگر: درخواست مجوز Notification (بی‌صدا اگر مجاز نباشد)
+    }
     const days = (state.notify && state.notify.days) || [7, 3, 1];
     const shown = state.notifShown || {};
     const now = Date.now();
@@ -325,7 +337,7 @@ const App = (() => {
     if (!state.backup || !state.backup.auto) return;
     if (Date.now() - (state.backup.lastAt || 0) < 86400000) return;
     const snap = { id: uid('bk'), at: Date.now(), day: jKey(jToday()), payload: exportPayload() };
-    await Store.put('backups', snap, snap.id);
+    await Store.put('backups', snap); // keyPath inline ('id') — کلید صریح DataError می‌داد (رفع باگ پشتیبان خودکار)
     const all = await Store.all('backups');
     all.sort((a, b) => b.at - a.at);
     for (const old of all.slice(7)) await Store.del('backups', old.id);
@@ -489,7 +501,7 @@ const App = (() => {
     const amtCls = t.status !== 'paid' ? 'amt-pend' : isIn ? 'amt-in' : 'amt-out';
     const sign = t.status !== 'paid' ? '' : isIn ? '+' : '−';
     return `<div class="row-item" data-tx="${t.id}">
-      <div class="row-ico" style="background:${cat ? 'color-mix(in srgb,' + cat.color + ',transparent)' : ''}">${cat ? cat.icon : t.type === 'income' ? '💰' : t.type === 'installment' ? '🏦' : '🧾'}</div>
+      <div class="row-ico" style="background:${cat && cat.color ? 'color-mix(in srgb,' + cat.color + ',transparent)' : ''}">${cat ? cat.icon : t.type === 'income' ? '💰' : t.type === 'installment' ? '🏦' : '🧾'}</div>
       <div class="row-main">
         <div class="t">${esc(t.title)}${t.essential ? ' <span class="badge violet">ضروری</span>' : ''}</div>
         <div class="s">${jDateLabel(t.jdate)}${cat ? ' • ' + esc(cat.name) : ''}${t.currency !== 'TMN' ? ' • ' + t.currency : ''}${(t.tags || []).map(g => `<span class="tag">#${esc(g)}</span>`).join('')}</div>
@@ -602,12 +614,12 @@ const App = (() => {
     const m1 = monthStats(jMonthKey(addJMonths(now, -1))), m2 = monthStats(jMonthKey(addJMonths(now, -2))), m3 = monthStats(jMonthKey(addJMonths(now, -3)));
     const avgOut = (m1.expense + m1.installPaid + m2.expense + m2.installPaid + m3.expense + m3.installPaid) / 3;
     const avgIn = (m1.income + m2.income + m3.income) / 3;
-    const upcomingInst = txs.filter(t => t.type === 'installment' && t.status === 'pending').reduce((a, t) => a + t.amount * t.rate, 0);
+    const upcomingInst = txs.filter(t => t.type === 'installment' && t.status === 'pending' && t.dueJdate && daysUntilJ(t.dueJdate) >= 0).reduce((a, t) => a + t.amount * t.rate, 0);
     let bal = walletBalance();
     const fData = [{ label: 'اکنون', value: bal }];
     const rows = [];
     for (let i = 1; i <= 3; i++) {
-      const inst = i === 1 ? Math.min(upcomingInst, upcomingInst) : upcomingInst * 0.6;
+      // ماه اول: اقساط واقعی پیش‌رو؛ ماه‌های بعد: میانگین
       const net = avgIn - avgOut - (i === 1 ? upcomingInst : 0);
       bal += net;
       const mk = addJMonths(now, i);
@@ -641,8 +653,8 @@ const App = (() => {
       <div id="aiOut"></div>` : ''}
     ${aiTab === 'online' ? `
       <div class="card">
-        <div class="card-title">هوش مصنوعی آنلاین <span class="ai-badge ${cfg.apiKey ? 'on' : 'off'}">${cfg.apiKey ? 'متصل' : 'کلید تنظیم نشده'}</span></div>
-        <p style="font-size:12px;color:var(--txt2);line-height:1.9;margin:0 0 12px">تمام داده‌های مالی تو (اقساط، بودجه، اهداف، موجودی و قیمت لحظه‌ای) برای تحلیل به مدل هوش مصنوعی ارسال می‌شود و تحلیل کامل و شخصی‌سازی‌شده می‌گیری. کلید API در <b data-go-tab="settings">تنظیمات</b> قابل تنظیم است.</p>
+        <div class="card-title">هوش مصنوعی آنلاین <span class="ai-badge on">✓ فعال — بدون نیاز به کلید</span></div>
+        <p style="font-size:12px;color:var(--txt2);line-height:1.9;margin:0 0 12px">تمام داده‌های مالی تو (اقساط، بودجه، اهداف، موجودی و قیمت لحظه‌ای) برای تحلیل به مدل هوش مصنوعی ارسال می‌شود و تحلیل کامل و شخصی‌سازی‌شده می‌گیری. دستیار آنلاین به‌صورت پیش‌فرض رایگان کار می‌کند؛ اگر بخواهی می‌توانی از <b data-go-tab="settings">تنظیمات</b> سرویس شخصی خودت را هم معرفی کنی.</p>
         <div class="chips" style="margin-bottom:12px">
           ${['کدام قسط مهم‌تر است و چرا؟', 'چقدر می‌توانم پس‌انداز کنم و چطور؟', 'با موجودی من چه چیزی بخرم؟', 'برنامه مالی یک‌ماهه برایم بساز'].map(q => `<button class="chip" data-qo="${esc(q)}">${q}</button>`).join('')}
         </div>
@@ -911,10 +923,8 @@ const App = (() => {
       const today = jKey(jToday());
       if (ch.log[today]) return UI.toast('امروز قبلاً ثبت کرده‌ای ✅', 'warn');
       ch.log[today] = ch.daily;
-      // ثبت تراکنش پس‌انداز
-      txs.push(normTx({ type: 'expense', title: 'پس‌انداز چالش ۳۰ روزه', amount: ch.daily, categoryId: null, essential: false, tags: ['چالش'], status: 'paid' }));
-      await persist('transactions');
-      const saved = Object.values(ch.log).reduce((a, b) => a + b, 0);
+      // توجه: پس‌انداز یک هزینه نیست — فقط در ثبت چالش ثبت می‌شود تا موجودی و گزارش‌ها خراب نشود (رفع باگ)
+      const saved = Object.values(ch.log).reduce((a, b) => a + (+b || 0), 0);
       if (Object.keys(ch.log).length >= 30) { UI.toast('🎉 چالش کامل شد! مجموع: ' + fmtToman(saved), 'ok'); Bridge.showNotification('🏆 فینوا', 'چالش ۳۰ روزه را کامل کردی! آفرین!', 7777, 'chDone'); }
       else UI.toast('ثبت شد! ادامه بده 🔥', 'ok');
       await saveState(); render('challenge');
@@ -943,13 +953,14 @@ const App = (() => {
       <button class="btn ghost full" id="testNotifBtn">🔔 تست اعلان سیستم</button>
     </div>
     <div class="card">
-      <div class="card-title">🌐 هوش مصنوعی آنلاین</div>
-      <div class="field"><label>آدرس سرویس (OpenAI-compatible)</label>
-        <input id="aiBase" dir="ltr" value="${esc(cfg.baseURL)}" placeholder="https://api.openai.com/v1">
-        <div class="hint">مثال: https://api.openai.com/v1 یا https://openrouter.ai/api/v1 یا یک سرور محلی LLM</div>
+      <div class="card-title">🌐 هوش مصنوعی آنلاین <span class="ai-badge on">رایگان — بدون کلید</span></div>
+      <p style="font-size:11.5px;color:var(--txt2);line-height:1.9;margin:0 0 10px">دستیار آنلاین به‌صورت پیش‌فرض با سرویس رایگان فینوا کار می‌کند و نیازی به کلید API نیست. اگر سرویس شخصی داری (OpenAI، OpenRouter یا هر سرویس سازگار)، مقادیر زیر را پر کن؛ برای بازگشت به حالت رایگان پیش‌فرض، همه را خالی بگذار و ذخیره کن.</p>
+      <div class="field"><label>آدرس سرویس (اختیاری)</label>
+        <input id="aiBase" dir="ltr" value="${esc(cfg.baseURL)}" placeholder="پیش‌فرض: سرویس رایگان فینوا">
+        <div class="hint">مثال: https://api.openai.com/v1 یا https://openrouter.ai/api/v1</div>
       </div>
-      <div class="field"><label>کلید API</label><input id="aiKey" dir="ltr" type="password" value="${esc(cfg.apiKey)}" placeholder="sk-..."></div>
-      <div class="field"><label>نام مدل</label><input id="aiModel" dir="ltr" value="${esc(cfg.model)}" placeholder="gpt-4o-mini"></div>
+      <div class="field"><label>کلید API (اختیاری)</label><input id="aiKey" dir="ltr" type="password" value="${esc(cfg.apiKey)}" placeholder="sk-..."></div>
+      <div class="field"><label>نام مدل (اختیاری)</label><input id="aiModel" dir="ltr" value="${esc(cfg.model)}" placeholder="openai"></div>
       <button class="btn full" id="saveAIBtn">ذخیره تنظیمات AI</button>
     </div>
     <div class="card">
@@ -975,7 +986,7 @@ const App = (() => {
     </div>
     <div class="card">
       <div class="card-title">ℹ️ درباره فینوا</div>
-      <p style="font-size:12.5px;color:var(--txt2);line-height:2;margin:0">فینوا نسخه ${esc(Bridge.version())} — مدیریت مالی هوشمند، کاملاً آفلاین و محلی.<br>داده‌هایت فقط روی همین گوشی ذخیره می‌شوند. 🔒<br>تقویم جلالی • تومان • RTL کامل</p>
+      <p style="font-size:12.5px;color:var(--txt2);line-height:2;margin:0">فینوا نسخه ${faDigits(APP_VERSION)} (${esc(Bridge.version())}) — مدیریت مالی هوشمند، کاملاً آفلاین و محلی.<br>داده‌هایت فقط روی همین گوشی ذخیره می‌شوند. 🔒<br>تقویم جلالی • تومان • RTL کامل</p>
     </div>`;
   }
 
@@ -1026,7 +1037,16 @@ const App = (() => {
     const addGs = t.closest('[data-goal-add]'); if (addGs) return goalDeposit(addGs.dataset.goalAdd);
     // تنظیمات
     if (t.closest('#testNotifBtn')) { Bridge.showNotification('✅ اعلان فینوا فعال است', 'یادآوری اقساط و بودجه به‌موقع می‌رسد.', 1, 'test'); return UI.toast('اعلان ارسال شد', 'ok'); }
-    if (t.closest('#saveAIBtn')) { state.aiBaseURL = document.getElementById('aiBase').value.trim(); state.aiApiKey = document.getElementById('aiKey').value.trim(); state.aiModel = document.getElementById('aiModel').value.trim() || 'gpt-4o-mini'; saveState(); return UI.toast('تنظیمات AI ذخیره شد ✅', 'ok'); }
+    if (t.closest('#saveAIBtn')) {
+      state.aiBaseURL = document.getElementById('aiBase').value.trim();
+      state.aiApiKey = document.getElementById('aiKey').value.trim();
+      state.aiModel = document.getElementById('aiModel').value.trim();
+      saveState().then(() => {
+        UI.toast(state.aiBaseURL ? 'سرویس شخصی AI ذخیره شد ✅' : 'حالت رایگان پیش‌فرض فینوا فعال شد ✅', 'ok');
+        if (curTab === 'settings') render('settings');
+      });
+      return;
+    }
     if (t.closest('#saveRatesBtn')) { state.manualUSD = document.getElementById('mUSD').value; state.manualGold = document.getElementById('mGold').value; saveState(); return UI.toast('ذخیره شد', 'ok'); }
     if (t.closest('#bkEncBtn')) return backupFile(true);
     if (t.closest('#bkPlainBtn')) return backupFile(false);
@@ -1185,7 +1205,7 @@ const App = (() => {
             const f = receiptEl.files[0];
             const b64 = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.readAsDataURL(f); });
             receiptId = uid('rc');
-            await Store.put('receipts', { id: receiptId, mime: f.type, data: b64 }, receiptId);
+            await Store.put('receipts', { id: receiptId, mime: f.type, data: b64 }); // keyPath inline ('id')
           } catch (e) { console.warn('receipt', e); }
         }
         const tags = document.getElementById('txTags').value.split(/[,،]/).map(s => s.trim()).filter(Boolean);
@@ -1223,14 +1243,29 @@ const App = (() => {
       </div>
       ${canPay ? `<div class="ai-bubble" style="margin-bottom:12px;font-size:12px">${enough ? '✅ موجودی کافی داری.' : `⚠️ موجودی (${fmtToman(bal)}) کافی نیست — کسری: ${fmtToman(t.amount * t.rate - bal)}`}</div>` : ''}
       ${canPay ? `<button class="btn ok full" id="payBtn">✅ پرداخت شد (${fmtShort(t.amount * t.rate)})</button><div style="height:9px"></div>` : ''}
+      ${canPay && t.amount <= 0 ? `<button class="btn ghost full" id="editAmtBtn">✏️ تعیین مبلغ این قسط</button><div style="height:9px"></div>` : ''}
       ${t.type === 'expense' && t.status === 'paid' ? `<button class="btn ghost full" id="editAmtBtn">✏️ تغییر مبلغ</button><div style="height:9px"></div>` : ''}
       <button class="btn danger full" id="delTxBtn">🗑 حذف تراکنش</button>
     `);
     const pay = document.getElementById('payBtn');
     if (pay) pay.onclick = async () => {
-      t.status = 'paid'; t.jdate = t.jdate || jKey(jToday());
+      // قسط با مبلغ متغیر (۰): قبل از پرداخت، مبلغ پرسیده شود (رفع باگ قسط ۰ تومانی)
+      if (t.amount <= 0) {
+        const v = await UI.prompt('مبلغ این قسط', 'مبلغ پرداخت‌شده این ماه را وارد کن (تومان):', 'number');
+        if (!v || !(+v > 0)) return;
+        t.amount = +v;
+      }
+      t.status = 'paid'; t.jdate = jKey(jToday()); // ماه گزارش = ماه واقعی پرداخت
       await persist('transactions');
-      // اگر قسط فعال باقی مانده‌هاست و قانون فعال است — قبلاً خودکار ساخته شده
+      // کاهش «تعداد قسط مانده» و پایان خودکار قانون (رفع باگ نادیده‌گرفتن تعداد قسط)
+      if (t.ruleId) {
+        const r = rules.find(x => x.id === t.ruleId);
+        if (r && r.remainingMonths > 0) {
+          r.remainingMonths--;
+          if (r.remainingMonths === 0) { r.active = false; UI.toast('🎉 همه اقساط این بدهی پرداخت شد!', 'ok'); }
+          await persist('rules');
+        }
+      }
       UI.closeModal(); UI.toast('قسط پرداخت شد ✅', 'ok'); Bridge.vibrate(40);
       Bridge.updateWidget(fmtShort(walletBalance()) + ' تومان', nextInstallmentLine(0), nextInstallmentLine(1), jDateLabel(jKey(jToday())));
       scheduleNotifications();
@@ -1279,11 +1314,13 @@ const App = (() => {
       if (!title) return UI.toast('عنوان را وارد کنید', 'warn');
       if (!document.getElementById('rVar').checked && amount <= 0) return UI.toast('مبلغ معتبر وارد کنید', 'warn');
       const isRent = title.includes('اجاره');
+      const tj = jToday();
       rules.push(normRule({
         title, amount, day, priority: isRent ? 1 : pri, essential: isRent ? true : document.getElementById('rEss').checked,
         variable: document.getElementById('rVar').checked,
         categoryId: document.getElementById('rCat').value, walletId: document.getElementById('rWallet').value,
         remainingMonths: +document.getElementById('rRem').value || 0, active: true, lastKey: '',
+        createdMk: jMonthKey(tj), createdD: tj.jd,
       }));
       await persist('rules');
       generateRecurring();
@@ -1379,6 +1416,7 @@ const App = (() => {
   /* ── خروجی‌ها ── */
   async function exportPDF() {
     UI.toast('در حال ساخت PDF…', 'ok');
+    try { await document.fonts.ready; } catch (e) {} // اطمینان از بارگذاری فونت فارسی روی بوم
     const mk = jMonthKey(jToday());
     const s = monthStats();
     const c = document.createElement('canvas');
@@ -1421,6 +1459,7 @@ const App = (() => {
     UI.toast('PDF ذخیره شد در Downloads ✅', 'ok');
   }
   async function shareCard() {
+    try { await document.fonts.ready; } catch (e) {}
     const s = monthStats();
     const c = Charts.reportCardCanvas({ month: jMonthKey(jToday()), balance: walletBalance(), income: s.income, expense: s.expense, installPaid: s.installPaid, installUpcoming: s.installPending, health: healthScore() });
     const b64 = c.toDataURL('image/png').split(',')[1];
@@ -1464,6 +1503,7 @@ const App = (() => {
 
 /* ═══ UI — Toast / Modal / Sheet / Prompt ═══ */
 const UI = (() => {
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
   function toast(msg, kind) {
     const w = document.getElementById('toastWrap');
     const t = document.createElement('div');
@@ -1502,7 +1542,7 @@ const UI = (() => {
     return new Promise(res => {
       const m = modal(title, `
         <p style="font-size:12.5px;color:var(--txt2);line-height:1.9">${text}</p>
-        <div class="field"><input id="prInp" type="${inputType || 'text'}" dir="${inputType === 'password' || inputType === 'number' ? 'ltr' : 'auto'}" value="${preset || ''}"></div>
+        <div class="field"><input id="prInp" type="${inputType || 'text'}" dir="${inputType === 'password' || inputType === 'number' ? 'ltr' : 'auto'}" value="${esc(preset || '')}"></div>
         <div class="btn-row"><button class="btn" id="prY">تأیید</button><button class="btn ghost" id="prN">انصراف</button></div>`);
       const inp = m.querySelector('#prInp');
       setTimeout(() => inp.focus(), 120);

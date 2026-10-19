@@ -50,11 +50,28 @@ const Bridge = (() => {
   function showNotification(title, body, id, tag) {
     if (native && native.showNotification) {
       try { native.showNotification(String(title || ''), String(body || ''), String(id || Date.now()), String(tag || 'finova')); } catch (e) {}
+      return;
     }
+    // حالت وب: Notification API مرورگر (رفع نبود اعلان در پیش‌نمایش)
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification(String(title || 'فینوا'), { body: String(body || ''), tag: String(tag || 'finova') });
+      }
+    } catch (e) {}
   }
   function requestNotifPermission() {
     return new Promise(res => {
-      if (!native || !native.requestNotifPermission) return res(true);
+      if (!native || !native.requestNotifPermission) {
+        // مرورگر: درخواست مجوز Notification
+        try {
+          if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+            Notification.requestPermission().then(g => { window.__notifPermHandler && window.__notifPermHandler(g === 'granted'); res(g === 'granted'); }).catch(() => res(false));
+            return;
+          }
+          res(typeof Notification !== 'undefined' && Notification.permission === 'granted');
+        } catch (e) { res(false); }
+        return;
+      }
       window.__notifPermHandler = (g) => res(!!g);
       try { native.requestNotifPermission(); } catch (e) { res(false); }
       setTimeout(() => res(true), 15000);

@@ -1,7 +1,7 @@
 /* ═══════════ لایه ذخیره‌سازی — IndexedDB با مهاجرت و پاک‌سازی واقعی ═══════════ */
 const Store = (() => {
   const DB_NAME = 'finova-db';
-  const DB_VER = 2;
+  const DB_VER = 3;
   let _db = null;
 
   function openOnce(timeoutMs) {
@@ -28,10 +28,8 @@ const Store = (() => {
               db.createObjectStore('backups', { keyPath: 'id' });
               db.createObjectStore('rates', { keyPath: 'key' });
             }
-            if (oldV >= 1 && oldV < 2) {
-              // v2: تاریخچه قیمت‌ها برای تحلیل روند طلا/دلار
-              if (!db.objectStoreNames.contains('rateHistory')) db.createObjectStore('rateHistory', { keyPath: 'day' });
-            }
+            // v2+: تاریخچه قیمت‌ها — همیشه بررسی می‌شود تا نصب تازه و دیتابیس‌های ناقص هم ساخته شوند (رفع باگ)
+            if (!db.objectStoreNames.contains('rateHistory')) db.createObjectStore('rateHistory', { keyPath: 'day' });
           } catch (err) { console.error('migrate err', err); }
         };
         req.onsuccess = () => { clearTimeout(timer); done(resolve, req.result); };
@@ -113,17 +111,22 @@ const Store = (() => {
 
 function uid(p) { return (p || 'id') + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 function normTx(t) {
-  return Object.assign({
+  const base = {
     id: t.id || uid('tx'), type: t.type || 'expense', title: t.title || '',
-    amount: +t.amount || 0, currency: t.currency || 'TMN', rate: +t.rate || 1,
-    categoryId: t.categoryId || null, walletId: t.walletId || null,
-    jdate: t.jdate || jKey(jToday()), priority: +t.priority || 3,
+    amount: +(t.amount) || 0, currency: t.currency || 'TMN', rate: +(t.rate) || 1,
+    categoryId: t.categoryId === undefined ? null : t.categoryId, walletId: t.walletId === undefined ? null : t.walletId,
+    jdate: t.jdate || jKey(jToday()), priority: +(t.priority) || 3,
     essential: !!t.essential, tags: Array.isArray(t.tags) ? t.tags : [],
     note: t.note || '', status: t.status || 'paid',
-    dueJdate: t.dueJdate || null, ruleId: t.ruleId || null, seq: +t.seq || 0,
+    dueJdate: t.dueJdate || null, ruleId: t.ruleId || null, seq: +(t.seq) || 0,
     createdAt: t.createdAt || Date.now(),
-  }, t);
+  };
+  const r = Object.assign(base, t || {});
+  if (!r.jdate) r.jdate = jKey(jToday()); // رفع باگ: تراکنش بدون تاریخ باعث کرش فیلتر ماه می‌شد
+  r.amount = +(r.amount) || 0; r.rate = +(r.rate) || 1; r.priority = +(r.priority) || 3;
+  if (!Array.isArray(r.tags)) r.tags = [];
+  return r;
 }
 function normWallet(w) { return Object.assign({ id: w.id || uid('w'), name: w.name || 'کیف پول', kind: w.kind || 'cash', initial: +w.initial || 0 }, w); }
 function normGoal(g) { return Object.assign({ id: g.id || uid('g'), title: g.title || 'هدف', target: +g.target || 0, saved: +g.saved || 0, deadlineJ: g.deadlineJ || null, note: g.note || '', createdJ: g.createdJ || jKey(jToday()) }, g); }
-function normRule(r) { return Object.assign({ id: r.id || uid('r'), title: r.title || 'قسط', amount: +r.amount || 0, variable: !!r.variable, day: +r.day || 1, priority: +r.priority || 3, essential: !!r.essential, categoryId: r.categoryId || null, walletId: r.walletId || null, active: r.active !== false, remainingMonths: +r.remainingMonths || 0, lastKey: r.lastKey || '', createdMk: r.createdMk || jMonthKey(jToday()), note: r.note || '' }, r); }
+function normRule(r) { return Object.assign({ id: r.id || uid('r'), title: r.title || 'قسط', amount: +(r.amount) || 0, variable: !!r.variable, day: +(r.day) || 1, priority: +(r.priority) || 3, essential: !!r.essential, categoryId: r.categoryId === undefined ? null : r.categoryId, walletId: r.walletId === undefined ? null : r.walletId, active: r.active !== false, remainingMonths: +(r.remainingMonths) || 0, lastKey: r.lastKey || '', createdMk: r.createdMk || jMonthKey(jToday()), createdD: +(r.createdD) || 1, note: r.note || '' }, r); }

@@ -128,7 +128,7 @@ public class MainActivity extends Activity {
                     HttpURLConnection c = (HttpURLConnection) new URL(urlStr).openConnection();
                     c.setRequestMethod(method == null ? "GET" : method);
                     c.setConnectTimeout(15000);
-                    c.setReadTimeout(55000);
+                    c.setReadTimeout(90000);
                     c.setRequestProperty("User-Agent", "Finova/1.0 (Android)");
                     org.json.JSONObject hs = new org.json.JSONObject(headersJson == null ? "{}" : headersJson);
                     java.util.Iterator<String> it = hs.keys();

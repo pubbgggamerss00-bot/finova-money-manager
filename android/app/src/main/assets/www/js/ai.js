@@ -1,23 +1,11 @@
 /* ═══════════ هوش مصنوعی دوگانه (آفلاین + آنلاین) + قیمت لحظه‌ای طلا و دلار ═══════════ */
 const AI = (() => {
 
-  /* ─────────── دریافت قیمت لحظه‌ای ─────────── */
+  /* ─────────── دریافت قیمت لحظه‌ای (TGJU اصلی، نوبیتکس پشتیبان) ─────────── */
   async function fetchRates() {
     const cached = await Store.get('rates', 'latest');
-    const hist = await Store.all('rateHistory');
     const result = { usd: null, gold18: null, goldCoin: null, mesghal: null, ts: 0, source: '', stale: false };
-    // ۱) نوبیتکس — دلار/تتر به ریال
-    try {
-      const r = await Bridge.http('https://api.nobitex.ir/market/stats?srcCurrency=usdt,btc&dstCurrency=rls', 'GET', null, null, 12000);
-      if (r.ok && r.body) {
-        const j = JSON.parse(r.body);
-        if (j && j.status === 'ok' && j.stats && j.stats.usdt) {
-          const rls = parseFloat(j.stats.usdt.latest || j.stats.usdt.bestSell || 0);
-          if (rls > 0) { result.usd = Math.round(rls / 10); result.ts = Date.now(); result.source = 'نوبیتکس'; }
-        }
-      }
-    } catch (e) {}
-    // ۲) TGJU — طلا
+    // ۱) TGJU — طلا + دلار (یک درخواست، دارای CORS برای مرورگر)
     try {
       const r2 = await Bridge.http('https://call5.tgju.org/ajax.json', 'GET', null, null, 15000);
       if (r2.ok && r2.body) {
@@ -26,12 +14,26 @@ const AI = (() => {
         const g18 = items['geram18'] && parseFloat(String(items['geram18'].p).replace(/,/g, ''));
         const coin = items['sekee'] && parseFloat(String(items['sekee'].p).replace(/,/g, ''));
         const mes = items['mesghal'] && parseFloat(String(items['mesghal'].p).replace(/,/g, ''));
-        if (g18 > 0) result.gold18 = Math.round(g18 / 10);
+        const usdT = items['price_dollar_rl'] && parseFloat(String(items['price_dollar_rl'].p).replace(/,/g, ''));
+        if (g18 > 0) { result.gold18 = Math.round(g18 / 10); result.ts = Date.now(); result.source = 'TGJU'; }
         if (coin > 0) result.goldCoin = Math.round(coin / 10);
         if (mes > 0) result.mesghal = Math.round(mes / 10);
-        if (g18 > 0) { result.ts = Math.max(result.ts, Date.now()); result.source = result.source ? result.source + '+TGJU' : 'TGJU'; }
+        if (usdT > 0 && !result.usd) { result.usd = Math.round(usdT / 10); result.ts = Math.max(result.ts, Date.now()); }
       }
     } catch (e) {}
+    // ۲) نوبیتکس — دلار/تتر به ریال (پشتیبان؛ در APK بدون محدودیت CORS)
+    if (!result.usd) {
+      try {
+        const r = await Bridge.http('https://api.nobitex.ir/market/stats?srcCurrency=usdt,btc&dstCurrency=rls', 'GET', null, null, 12000);
+        if (r.ok && r.body) {
+          const j = JSON.parse(r.body);
+          if (j && j.status === 'ok' && j.stats && j.stats.usdt) {
+            const rls = parseFloat(j.stats.usdt.latest || j.stats.usdt.bestSell || 0);
+            if (rls > 0) { result.usd = Math.round(rls / 10); result.ts = Date.now(); result.source = result.source ? result.source + '+نوبیتکس' : 'نوبیتکس'; }
+          }
+        }
+      } catch (e) {}
+    }
     // دستی‌های کاربر اگر API کار نکرد
     const st = App && App.state ? App.state : {};
     if (!result.usd && st.manualUSD) { result.usd = +st.manualUSD; result.source = 'دستی'; }
@@ -39,9 +41,9 @@ const AI = (() => {
     // کش
     if (result.usd || result.gold18) {
       const val = { key: 'latest', ...result, savedAt: Date.now() };
-      await Store.put('rates', val, 'latest');
+      await Store.put('rates', val);            // keyPath inline ('key') — کلید صریح DataError می‌داد (رفع باگ قیمت‌ها)
       const day = jKey(jToday());
-      await Store.put('rateHistory', { day, usd: result.usd, gold18: result.gold18, ts: Date.now() }, day);
+      await Store.put('rateHistory', { day, usd: result.usd, gold18: result.gold18, ts: Date.now() }); // keyPath inline ('day')
       return val;
     }
     if (cached) return { ...cached, stale: true, source: (cached.source || '') + ' (کش)' };
@@ -173,13 +175,20 @@ const AI = (() => {
     return parts.join('\n');
   }
 
-  /* ─────────── موتور آنلاین — LLM واقعی (OpenAI-compatible) ─────────── */
+  /* ─────────── موتور آنلاین — LLM واقعی، پیش‌فرض رایگان و بدون کلید ─────────── */
+  const AI_DEFAULT_BASE = 'https://text.pollinations.ai/openai';
+  const AI_DEFAULT_MODEL = 'openai';
+
   function aiConfig() {
     const st = App.state || {};
+    const custom = !!(st.aiBaseURL && String(st.aiBaseURL).trim());
     return {
-      baseURL: (st.aiBaseURL || 'https://api.openai.com/v1').replace(/\/+$/, ''),
+      baseURL: (custom ? String(st.aiBaseURL).trim() : AI_DEFAULT_BASE).replace(/\/+$/, ''),
       apiKey: st.aiApiKey || '',
-      model: st.aiModel || 'gpt-4o-mini',
+      model: (st.aiModel && String(st.aiModel).trim()) || AI_DEFAULT_MODEL,
+      isDefault: !custom,
+      // وب پیش‌نمایش → همان‌مبدأ سرور فینوا (/api/ai/complete)؛ APK/سرویس شخصی → OpenAI-compatible
+      transport: custom ? 'openai' : (Bridge.hasNative() ? 'openai' : 'server'),
     };
   }
   function buildContext() {
@@ -209,32 +218,48 @@ const AI = (() => {
   }
   async function onlineAnswer(question, onProgress) {
     const cfg = aiConfig();
-    if (!cfg.apiKey) throw new Error('کلید API تنظیم نشده است. از ⚙️ تنظیمات → هوش مصنوعی آنلاین، آدرس سرویس و کلید API را وارد کن.');
     if (onProgress) onProgress('در حال جمع‌آوری داده‌های مالی…');
     const ctx = buildContext();
-    const sys = 'تو «دستیار مالی فینوا» هستی؛ یک مشاور مالی خبره برای کاربر ایرانی. همیشه فقط فارسی، روان و با لحن دوستانه و کاربردی جواب بده. از اعداد واقعی context استفاده کن و مبالغ را با تومان و جداکننده هزارگان بنویس. پاسخ را ساختارمند با تیترها (با ایموجی) و فهرست بده. اگر کاربر درباره اولویت اقساط پرسید بر اساس ضروری بودن، موعد و مبلغ اولویت بده (اجاره بالاترین اولویت). اگر درباره سرمایه‌گذاری پرسید بر اساس قیمت‌های لحظه‌ای context و تحلیل روند طلا و دلار جواب بده و ریسک‌ها را بگو. اگر داده کافی نیست، محتاطانه و شفاف بگو.';
-    const body = JSON.stringify({
-      model: cfg.model,
-      messages: [
-        { role: 'system', content: sys },
-        { role: 'user', content: 'داده‌های مالی من (JSON):\n' + JSON.stringify(ctx, null, 1) + '\n\nسؤال من: ' + question },
-      ],
-      temperature: 0.6,
-      max_tokens: 1400,
-    });
+    const sys = 'تو «دستیار مالی فینوا» هستی؛ یک مشاور مالی خبره برای کاربر ایرانی. همیشه فقط فارسی، روان و با لحن دوستانه و کاربردی جواب بده. از اعداد واقعی context استفاده کن و مبالغ را با تومان و جداکننده هزارگان بنویس. پاسخ را ساختارمند با تیترها (با ایموجی) و فهرست بده و از علامت ** برای پررنگ کردن استفاده کن. اگر کاربر درباره اولویت اقساط پرسید بر اساس ضروری بودن، موعد و مبلغ اولویت بده (اجاره بالاترین اولویت). اگر درباره سرمایه‌گذاری پرسید بر اساس قیمت‌های لحظه‌ای context و تحلیل روند طلا و دلار جواب بده و ریسک‌ها را بگو. اگر داده کافی نیست، محتاطانه و شفاف بگو.';
+    const messages = [
+      { role: 'system', content: sys },
+      { role: 'user', content: 'داده‌های مالی من (JSON):\n' + JSON.stringify(ctx, null, 1) + '\n\nسؤال من: ' + question },
+    ];
     if (onProgress) onProgress('در حال گفتگو با هوش مصنوعی…');
-    const r = await Bridge.http(cfg.baseURL + '/chat/completions', 'POST', { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey }, body, 60000);
-    if (!r.ok) {
-      let msg = 'خطای سرویس (' + r.status + ')';
-      try { const j = JSON.parse(r.body); msg = j.error && j.error.message ? j.error.message : msg; } catch (e) {}
-      throw new Error(msg);
+    let txt = null;
+    if (cfg.transport === 'server') {
+      // حالت وب: از سرور همان‌مبدأ فینوا (رایگان، بدون کلید، بدون مشکل CORS)
+      const r = await Bridge.http('/api/ai/complete', 'POST', { 'Content-Type': 'application/json' }, JSON.stringify({ messages }), 110000);
+      if (!r.ok) {
+        let msg = 'خطای سرور فینوا (' + r.status + ')';
+        try { const j = JSON.parse(r.body); if (j && j.error) msg = j.error; } catch (e) {}
+        throw new Error(msg);
+      }
+      try {
+        const j = JSON.parse(r.body);
+        txt = j.content || (j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '';
+        if (!txt) throw new Error('empty');
+      } catch (e) { throw new Error('پاسخ نامعتبر از سرور فینوا'); }
+    } else {
+      // حالت بومی/سرویس شخصی: OpenAI-compatible (پیش‌فرض رایگان = pollinations)
+      const headers = { 'Content-Type': 'application/json' };
+      if (cfg.apiKey) headers['Authorization'] = 'Bearer ' + cfg.apiKey;
+      const url = /\/chat\/completions$/.test(cfg.baseURL) ? cfg.baseURL : cfg.baseURL + '/chat/completions';
+      const body = JSON.stringify({ model: cfg.model, messages, temperature: 0.6, max_tokens: 1600 });
+      const r = await Bridge.http(url, 'POST', headers, body, 110000);
+      if (!r.ok) {
+        let msg = 'خطای سرویس (' + r.status + ')';
+        try { const j = JSON.parse(r.body); msg = j.error && j.error.message ? j.error.message : (typeof j.error === 'string' ? j.error : msg); } catch (e) {}
+        if (cfg.isDefault) msg += ' — سرویس رایگان موقتاً در دسترس نیست؛ چند لحظه بعد دوباره امتحان کن یا از تنظیمات سرویس شخصی وارد کن.';
+        throw new Error(msg);
+      }
+      try {
+        const j = JSON.parse(r.body);
+        txt = j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+        if (!txt) throw new Error('پاسخ نامعتبر از سرویس');
+      } catch (e) { throw new Error('پارس پاسخ ناموفق بود: ' + String(r.body).slice(0, 200)); }
     }
-    try {
-      const j = JSON.parse(r.body);
-      const txt = j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
-      if (!txt) throw new Error('پاسخ نامعتبر از سرویس');
-      return txt.trim();
-    } catch (e) { throw new Error('پارس پاسخ ناموفق بود: ' + r.body.slice(0, 200)); }
+    return txt.trim();
   }
 
   return { fetchRates, rateHistory, offlineAnswer, onlineAnswer, buildContext, aiConfig };
