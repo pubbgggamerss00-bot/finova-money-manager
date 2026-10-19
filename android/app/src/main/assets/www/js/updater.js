@@ -54,18 +54,17 @@ const Updater = (() => {
   /** استخراج بخش «تازه‌ها» از متن Release */
   function parseChangelog(body) {
     const lines = String(body || '').replace(/<!--[\s\S]*?-->/g, '').split(/\r?\n/);
-    // ۱) بخش هدشدار مخصوص تازه‌ها
-    let start = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (/^#{1,4}\s/.test(lines[i]) && /تازه|قابلیت|جدید|امکان|چنگ‌لوج|changelog|feature|بهبود/i.test(lines[i])) { start = i + 1; break; }
-    }
-    if (start >= 0) {
+    // ۱) بخش هدشدار مخصوص تازه‌ها — فقط h2 به بعد (تیتر h1 اپ کلمه «جدید» هم می‌تواند داشته باشد!)
+    for (let h = 0; h < lines.length; h++) {
+      if (!/^#{2,4}\s/.test(lines[h])) continue;
+      if (!/تازه|قابلیت|جدید|امکان|چنگ‌لوج|changelog|feature|بهبود/i.test(lines[h])) continue;
       const out = [];
-      for (let i = start; i < lines.length && out.length < 24; i++) {
+      for (let i = h + 1; i < lines.length && out.length < 24; i++) {
         if (/^#{1,4}\s/.test(lines[i])) break;
         if (lines[i].trim()) out.push(lines[i].trim());
       }
       if (out.length) return out.join('\n');
+      // بخش خالی بود → هدینگ بعدی نامزد را امتحان کن
     }
     // ۲) فال‌بک: همه بندهای لیستی
     const bullets = lines.map(l => l.trim()).filter(l => /^([-*•]|[✨✅🔧⭐🚀🎉]\s)/.test(l) && l.length > 2).slice(0, 14);
