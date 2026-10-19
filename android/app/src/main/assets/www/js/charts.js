@@ -8,19 +8,25 @@ const Charts = (() => {
     ctx.stroke(); ctx.restore();
   };
 
-  function makeCanvas(h) {
+  function makeCanvas(h, el) {
     const dpr = window.devicePixelRatio || 1;
-    const W = Math.min(document.getElementById('view') ? document.getElementById('view').clientWidth - 34 : 340, 800);
+    // عرض را از خودِ ظرف عنصر بگیر (رفع باگ سرریز کانواس گیج و چارت‌ها در ظرف‌های کوچک)
+    let W = 0;
+    if (el && el.clientWidth > 40) W = el.clientWidth;
+    else W = Math.min(document.getElementById('view') ? document.getElementById('view').clientWidth - 34 : 340, 800);
+    W = Math.max(60, Math.min(W, 800));
     const c = document.createElement('canvas');
-    c.width = W * dpr; c.height = h * dpr; c.style.height = h + 'px';
+    c.width = W * dpr; c.height = h * dpr;
+    c.style.width = W + 'px'; c.style.height = h + 'px';   // اندازه صریح — دیگر سرریز نمی‌کند
     const ctx = c.getContext('2d'); ctx.scale(dpr, dpr);
     return { c, ctx, W, h };
   }
 
   // ── نمودار خطی/ستونی درآمد و هزینه ──
   function trend(el, data) { // data: [{label, in, out}]
-    const { c, ctx, W, h } = makeCanvas(200);
+    const { c, ctx, W, h } = makeCanvas(200, el);
     const pad = { t: 16, b: 26, l: 8, r: 8 };
+    const hasData = data.some(d => d.in > 0 || d.out > 0);
     const maxV = Math.max(1, ...data.map(d => Math.max(d.in, d.out)));
     const iw = (W - pad.l - pad.r) / data.length;
     const bh = h - pad.t - pad.b;
@@ -38,6 +44,13 @@ const Charts = (() => {
       ctx.fillStyle = css('--txt3'); ctx.font = '10px Vazirmatn,Tahoma'; ctx.textAlign = 'center';
       ctx.fillText(d.label, pad.l + iw * i + iw / 2, h - 8);
     });
+    // حالت خالی — پیام دوستانه به‌جای چارت خالی
+    if (!hasData) {
+      ctx.fillStyle = css('--txt3'); ctx.font = '12px Vazirmatn,Tahoma'; ctx.textAlign = 'center';
+      ctx.fillText('هنوز تراکنشی ثبت نشده', W / 2, pad.t + bh * 0.42);
+      ctx.font = '10.5px Vazirmatn,Tahoma';
+      ctx.fillText('اولین درآمد و هزینه‌ات را ثبت کن تا روند اینجا ساخته شود', W / 2, pad.t + bh * 0.42 + 20);
+    }
     el.innerHTML = ''; el.appendChild(c);
   }
 
@@ -49,7 +62,7 @@ const Charts = (() => {
 
   // ── دونات دسته‌بندی‌ها ──
   function donut(el, items) { // [{label, value, color}]
-    const { c, ctx, W, h } = makeCanvas(190);
+    const { c, ctx, W, h } = makeCanvas(190, el);
     const cx = W / 2, cy = h / 2, R = Math.min(W, h) / 2 - 12, r = R * 0.62;
     const total = items.reduce((s, i) => s + i.value, 0) || 1;
     let ang = -Math.PI / 2;
@@ -69,7 +82,7 @@ const Charts = (() => {
 
   // ── نمودار پیش‌بینی (خطی) ──
   function forecast(el, data) { // [{label, value, projected}]
-    const { c, ctx, W, h } = makeCanvas(190);
+    const { c, ctx, W, h } = makeCanvas(190, el);
     const pad = { t: 20, b: 28, l: 10, r: 10 };
     const vals = data.map(d => Math.max(0, d.value));
     const maxV = Math.max(1, ...vals) * 1.15;
@@ -96,9 +109,10 @@ const Charts = (() => {
   }
 
   // ── گیج امتیاز سلامت ──
-  function gauge(el, score) {
-    const { c, ctx, W, h } = makeCanvas(130);
-    const cx = W / 2, cy = h - 14, R = Math.min(W / 2, h - 20);
+  function gauge(el, score, showNum) {
+    // عرض کانواس = عرض ظرف (۱۳۰/۱۵۰px) — رفع باگ همپوشانی متن روی گیج
+    const { c, ctx, W, h } = makeCanvas(130, el);
+    const cx = W / 2, cy = h - 14, R = Math.min(W / 2, h - 20) - 4;
     const start = Math.PI, end = 2 * Math.PI;
     ctx.lineWidth = 13; ctx.lineCap = 'round';
     ctx.strokeStyle = css('--line'); ctx.beginPath(); ctx.arc(cx, cy, R - 8, start, end); ctx.stroke();
@@ -106,8 +120,10 @@ const Charts = (() => {
     const grad = ctx.createLinearGradient(0, 0, W, 0); grad.addColorStop(0, css('--pri')); grad.addColorStop(1, col);
     ctx.strokeStyle = grad; ctx.shadowColor = col; ctx.shadowBlur = 12;
     ctx.beginPath(); ctx.arc(cx, cy, R - 8, start, start + Math.PI * (score / 100)); ctx.stroke(); ctx.shadowBlur = 0;
-    ctx.fillStyle = css('--txt'); ctx.font = '900 26px Vazirmatn,Tahoma'; ctx.textAlign = 'center';
-    ctx.fillText(faDigits(score), cx, cy - 10);
+    if (showNum !== false) {
+      ctx.fillStyle = css('--txt'); ctx.font = '900 26px Vazirmatn,Tahoma'; ctx.textAlign = 'center';
+      ctx.fillText(faDigits(score), cx, cy - 10);
+    }
     el.innerHTML = ''; el.appendChild(c);
   }
 

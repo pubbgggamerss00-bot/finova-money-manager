@@ -21,7 +21,7 @@ echo "── 2) aapt2: لینک (تولید R.java و apk پایه)"
   -I "$AJAR" \
   --manifest "$SRC/AndroidManifest.xml" \
   --min-sdk-version 29 --target-sdk-version 34 \
-  --version-code 2 --version-name "1.1.0" \
+  --version-code 3 --version-name "1.2.0" \
   --auto-add-overlay \
   --java "$WORK/gen" \
   "$WORK/res.zip"
@@ -55,10 +55,10 @@ if [ ! -f finova-key.jks ]; then
     -dname "CN=Finova Money, O=Finova, C=IR" >/dev/null 2>&1
 fi
 "$BT/apksigner" sign --ks finova-key.jks --ks-pass pass:finova123456 \
-  --key-pass pass:finova123456 --out "$OUT/Finova-v1.1.0.apk" "$WORK/aligned.apk"
+  --key-pass pass:finova123456 --out "$OUT/Finova-v1.2.0.apk" "$WORK/aligned.apk"
 
 echo "── 8) تأیید امضا"
-"$BT/apksigner" verify --print-certs "$OUT/Finova-v1.1.0.apk" | head -4
+"$BT/apksigner" verify --print-certs "$OUT/Finova-v1.2.0.apk" | head -4
 
 echo ""
-echo "✅ APK ساخته شد: $(pwd)/$OUT/Finova-v1.1.0.apk ($(du -h "$OUT/Finova-v1.1.0.apk" | cut -f1))"
+echo "✅ APK ساخته شد: $(pwd)/$OUT/Finova-v1.2.0.apk ($(du -h "$OUT/Finova-v1.2.0.apk" | cut -f1))"

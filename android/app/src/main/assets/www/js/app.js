@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.1.0';
+  const APP_VERSION = '1.2.0';
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -386,7 +386,7 @@ const App = (() => {
   function afterRender(tab) {
     if (tab === 'dashboard') {
       const g = document.getElementById('healthGauge');
-      if (g) Charts.gauge(g, healthScore());
+      if (g) Charts.gauge(g, healthScore(), false); // عدد کنار گیج در HTML نمایش داده می‌شود — جلوگیری از تکرار
       const c = document.getElementById('dashTrend');
       if (c) {
         const data = [];
@@ -555,9 +555,9 @@ const App = (() => {
     <div class="card glow">
       <div class="card-title">❤️ امتیاز سلامت مالی</div>
       <div class="score-wrap"><div id="healthGauge2" style="width:150px"></div>
-        <div style="flex:1">
-          <div class="stat" style="margin-bottom:8px"><div class="k">نرخ پس‌انداز</div><div class="v" style="color:var(--ok2)">${faDigits(s.income ? Math.round((s.income - s.expense - s.installPaid) / s.income * 100) : 0)}٪</div></div>
-          <div class="stat"><div class="k">پوشش اقساط با موجودی</div><div class="v">${s.installPending > 0 ? faDigits(Math.round(walletBalance() / s.installPending * 100)) + '٪' : '✅'}</div></div>
+        <div style="flex:1;min-width:0">
+          <div class="stat" style="margin-bottom:8px"><div class="k">نرخ پس‌انداز</div><div class="v" style="color:var(--ok2)">${s.income > 0 ? faDigits(Math.round((s.income - s.expense - s.installPaid) / s.income * 100)) + '٪' : '—'}</div></div>
+          <div class="stat"><div class="k">پوشش اقساط با موجودی</div><div class="v">${s.installPending > 0 ? faDigits(Math.round(walletBalance() / s.installPending * 100)) + '٪' : '<span style="color:var(--ok2)">کامل ✓</span>'}</div></div>
         </div>
       </div>
     </div>
@@ -653,8 +653,8 @@ const App = (() => {
       <div id="aiOut"></div>` : ''}
     ${aiTab === 'online' ? `
       <div class="card">
-        <div class="card-title">هوش مصنوعی آنلاین <span class="ai-badge on">✓ فعال — بدون نیاز به کلید</span></div>
-        <p style="font-size:12px;color:var(--txt2);line-height:1.9;margin:0 0 12px">تمام داده‌های مالی تو (اقساط، بودجه، اهداف، موجودی و قیمت لحظه‌ای) برای تحلیل به مدل هوش مصنوعی ارسال می‌شود و تحلیل کامل و شخصی‌سازی‌شده می‌گیری. دستیار آنلاین به‌صورت پیش‌فرض رایگان کار می‌کند؛ اگر بخواهی می‌توانی از <b data-go-tab="settings">تنظیمات</b> سرویس شخصی خودت را هم معرفی کنی.</p>
+        <div class="card-title">هوش مصنوعی آنلاین <span class="ai-badge on">✓ ${esc(cfg.label || 'سرویس رایگان فینوا')} — فعال</span></div>
+        <p style="font-size:12px;color:var(--txt2);line-height:1.9;margin:0 0 12px">تمام داده‌های مالی تو (اقساط، بودجه، اهداف، موجودی و قیمت لحظه‌ای) برای تحلیل به مدل هوش مصنوعی ارسال می‌شود و تحلیل کامل و شخصی‌سازی‌شده می‌گیری. ${cfg.isDefault ? 'سرویس پیش‌فرض <b>رایگان</b> است و به هیچ کلید API نیاز ندارد' : 'از سرویس شخصی خودت استفاده می‌شود'}؛ برای تغییر به <b data-go-tab="settings">تنظیمات</b> برو.</p>
         <div class="chips" style="margin-bottom:12px">
           ${['کدام قسط مهم‌تر است و چرا؟', 'چقدر می‌توانم پس‌انداز کنم و چطور؟', 'با موجودی من چه چیزی بخرم؟', 'برنامه مالی یک‌ماهه برایم بساز'].map(q => `<button class="chip" data-qo="${esc(q)}">${q}</button>`).join('')}
         </div>
@@ -953,15 +953,16 @@ const App = (() => {
       <button class="btn ghost full" id="testNotifBtn">🔔 تست اعلان سیستم</button>
     </div>
     <div class="card">
-      <div class="card-title">🌐 هوش مصنوعی آنلاین <span class="ai-badge on">رایگان — بدون کلید</span></div>
-      <p style="font-size:11.5px;color:var(--txt2);line-height:1.9;margin:0 0 10px">دستیار آنلاین به‌صورت پیش‌فرض با سرویس رایگان فینوا کار می‌کند و نیازی به کلید API نیست. اگر سرویس شخصی داری (OpenAI، OpenRouter یا هر سرویس سازگار)، مقادیر زیر را پر کن؛ برای بازگشت به حالت رایگان پیش‌فرض، همه را خالی بگذار و ذخیره کن.</p>
+      <div class="card-title">🌐 هوش مصنوعی آنلاین <span class="ai-badge ${cfg.isDefault ? 'on' : 'off'}">${cfg.isDefault ? 'رایگان — بدون کلید' : 'سرویس شخصی'}</span></div>
+      <p style="font-size:11.5px;color:var(--txt2);line-height:1.9;margin:0 0 10px">سرویس فعال الان: <b>${esc(cfg.label || '')}</b>${cfg.isDefault ? ' — رایگان و بدون نیاز به کلید API کار می‌کند.' : '.'} اگر سرویس شخصی داری (OpenAI، OpenRouter یا هر سرویس سازگار)، مقادیر زیر را پر کن؛ برای بازگشت به حالت رایگان، فیلدها را خالی کن و ذخیره بزن.</p>
       <div class="field"><label>آدرس سرویس (اختیاری)</label>
-        <input id="aiBase" dir="ltr" value="${esc(cfg.baseURL)}" placeholder="پیش‌فرض: سرویس رایگان فینوا">
-        <div class="hint">مثال: https://api.openai.com/v1 یا https://openrouter.ai/api/v1</div>
+        <input id="aiBase" dir="ltr" value="${esc(cfg.isDefault ? '' : cfg.baseURL)}" placeholder="خالی = سرویس رایگان فینوا">
+        <div class="hint">مثال: https://api.openai.com/v1 یا https://openrouter.ai/api/v1 — هر سرویس نیازمند کلید، باید کلید هم داشته باشد.</div>
       </div>
       <div class="field"><label>کلید API (اختیاری)</label><input id="aiKey" dir="ltr" type="password" value="${esc(cfg.apiKey)}" placeholder="sk-..."></div>
-      <div class="field"><label>نام مدل (اختیاری)</label><input id="aiModel" dir="ltr" value="${esc(cfg.model)}" placeholder="openai"></div>
+      <div class="field"><label>نام مدل (اختیاری)</label><input id="aiModel" dir="ltr" value="${esc(cfg.isDefault && cfg.model === 'openai' ? '' : cfg.model)}" placeholder="openai"></div>
       <button class="btn full" id="saveAIBtn">ذخیره تنظیمات AI</button>
+      ${!cfg.isDefault ? '<button class="btn ghost full" id="resetAIBtn" style="margin-top:8px">↩ بازگشت به سرویس رایگان فینوا</button>' : ''}
     </div>
     <div class="card">
       <div class="card-title">💱 قیمت دستی (اگر API در دسترس نبود)</div>
@@ -1041,10 +1042,19 @@ const App = (() => {
       state.aiBaseURL = document.getElementById('aiBase').value.trim();
       state.aiApiKey = document.getElementById('aiKey').value.trim();
       state.aiModel = document.getElementById('aiModel').value.trim();
+      if (state.aiBaseURL && !state.aiApiKey && /openai|openrouter|groq|anthropic|deepseek/i.test(state.aiBaseURL)) {
+        UI.toast('این سرویس بدون کلید API کار نمی‌کند — کلید را وارد کن یا فیلد آدرس را خالی بگذار', 'warn');
+        return;
+      }
       saveState().then(() => {
         UI.toast(state.aiBaseURL ? 'سرویس شخصی AI ذخیره شد ✅' : 'حالت رایگان پیش‌فرض فینوا فعال شد ✅', 'ok');
         if (curTab === 'settings') render('settings');
       });
+      return;
+    }
+    if (t.closest('#resetAIBtn')) {
+      state.aiBaseURL = ''; state.aiApiKey = ''; state.aiModel = '';
+      saveState().then(() => { UI.toast('سرویس رایگان فینوا فعال شد ✅', 'ok'); render('settings'); });
       return;
     }
     if (t.closest('#saveRatesBtn')) { state.manualUSD = document.getElementById('mUSD').value; state.manualGold = document.getElementById('mGold').value; saveState(); return UI.toast('ذخیره شد', 'ok'); }

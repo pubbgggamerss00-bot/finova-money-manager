@@ -96,6 +96,7 @@ function jDateLabel(k) {
   return faDigits(String(t.jd)) + ' ' + FA_MONTHS[t.jm - 1] + ' ' + faDigits(t.jy);
 }
 function jMonthLabel(mk) {
+  mk = mk || jMonthKey(jToday()); // بدون آرگومان = ماه جاری (رفع باگ نمایش «—» در عنوان کارت‌ها)
   if (!mk) return '—';
   const t = parseJKey(mk);
   return FA_MONTHS[t.jm - 1] + ' ' + faDigits(t.jy);

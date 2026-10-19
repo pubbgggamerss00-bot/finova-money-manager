@@ -179,17 +179,53 @@ const AI = (() => {
   const AI_DEFAULT_BASE = 'https://text.pollinations.ai/openai';
   const AI_DEFAULT_MODEL = 'openai';
 
+  // سرویس‌هایی که بدون کلید API هرگز کار نمی‌کنند (تنظیمات خراب قدیمی → بازنشانی خودکار)
+  const KEY_REQUIRED_HOSTS = ['api.openai.com', 'openrouter.ai', 'api.groq.com', 'api.anthropic.com', 'generativelanguage.googleapis.com', 'api.deepseek.com', 'api.x.ai', 'api.together.xyz', 'api.mistral.ai', 'api.cohere.ai', 'api.cohere.com'];
+
+  function isKeyRequired(url) {
+    try { const h = new URL(url).hostname.toLowerCase(); return KEY_REQUIRED_HOSTS.some(k => h === k || h.endsWith('.' + k)); }
+    catch (e) { return /openai|openrouter|groq|anthropic|deepseek|mistral|cohere/i.test(url); }
+  }
+
   function aiConfig() {
     const st = App.state || {};
-    const custom = !!(st.aiBaseURL && String(st.aiBaseURL).trim());
+    let customURL = st.aiBaseURL && String(st.aiBaseURL).trim() ? String(st.aiBaseURL).trim() : '';
+    const apiKey = st.aiApiKey || '';
+    // رفع خودکار تنظیمات خراب: سرویس شخصیِ نیازمند کلید بدون کلید → حذف و برگشت به سرویس رایگان
+    if (customURL && !apiKey && isKeyRequired(customURL)) {
+      customURL = '';
+      st.aiBaseURL = ''; st.aiModel = '';
+      if (App.saveState) App.saveState();
+    }
+    const custom = !!customURL;
     return {
-      baseURL: (custom ? String(st.aiBaseURL).trim() : AI_DEFAULT_BASE).replace(/\/+$/, ''),
-      apiKey: st.aiApiKey || '',
+      baseURL: (custom ? customURL : AI_DEFAULT_BASE).replace(/\/+$/, ''),
+      apiKey: apiKey,
       model: (st.aiModel && String(st.aiModel).trim()) || AI_DEFAULT_MODEL,
       isDefault: !custom,
+      label: custom ? 'سرویس شخصی' : 'سرویس رایگان فینوا',
       // وب پیش‌نمایش → همان‌مبدأ سرور فینوا (/api/ai/complete)؛ APK/سرویس شخصی → OpenAI-compatible
       transport: custom ? 'openai' : (Bridge.hasNative() ? 'openai' : 'server'),
     };
+  }
+
+  // تبدیل هر خطای خام (اغلب انگلیسی) به پیام فارسی قابل فهم
+  function faError(status, rawBody, wasDefault) {
+    const raw = String(rawBody || '').slice(0, 400);
+    const low = raw.toLowerCase();
+    let msg = '';
+    if (status === 402 || low.includes('free_limit') || low.includes('rate limit') || low.includes('too many requests') || status === 429)
+      msg = 'سرویس رایگان هوش مصنوعی الان شلوغ است (محدودیت هر ۳۰ ثانیه). ۳۰ ثانیه صبر کن و دوباره امتحان کن — یا از تنظیمات یک سرویس شخصی معرفی کن.';
+    else if (status === 401 || status === 403 || low.includes('api key') || low.includes('unauthorized') || low.includes('forbidden'))
+      msg = wasDefault ? 'دسترسی به سرویس رایگان موقتاً محدود شده. از تنظیمات می‌توانی سرویس شخصی (OpenAI/OpenRouter) معرفی کنی.' : 'کلید API معتبر نیست یا منقضی شده است. آن را در تنظیمات بررسی کن یا فیلدها را خالی بگذار تا سرویس رایگان فینوا فعال شود.';
+    else if (status === 0 || low.includes('timeout') || low.includes('err:'))
+      msg = 'اتصال به اینترنت برقرار نشد. اینترنت گوشی را بررسی کن و دوباره تلاش کن.';
+    else if (status >= 500)
+      msg = 'سرور هوش مصنوعی موقتاً در دسترس نیست. چند لحظه بعد دوباره امتحان کن.';
+    else if (low.includes('insufficient') || low.includes('quota') || low.includes('billing') || status === 402)
+      msg = 'اعتبار سرویس تمام شده است. از تنظیمات سرویس دیگری معرفی کن یا فیلدها را خالی کن تا سرویس رایگان فعال شود.';
+    if (!msg) msg = 'خطای غیرمنتظره در ارتباط با هوش مصنوعی' + (status ? ' (کد ' + faDigits(status) + ')' : '') + '. دوباره تلاش کن.';
+    return msg;
   }
   function buildContext() {
     const d = collectData();
@@ -230,34 +266,50 @@ const AI = (() => {
     if (cfg.transport === 'server') {
       // حالت وب: از سرور همان‌مبدأ فینوا (رایگان، بدون کلید، بدون مشکل CORS)
       const r = await Bridge.http('/api/ai/complete', 'POST', { 'Content-Type': 'application/json' }, JSON.stringify({ messages }), 110000);
-      if (!r.ok) {
-        let msg = 'خطای سرور فینوا (' + r.status + ')';
-        try { const j = JSON.parse(r.body); if (j && j.error) msg = j.error; } catch (e) {}
-        throw new Error(msg);
-      }
+      if (!r.ok) throw new Error(faError(r.status, r.body, true));
       try {
         const j = JSON.parse(r.body);
         txt = j.content || (j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '';
         if (!txt) throw new Error('empty');
-      } catch (e) { throw new Error('پاسخ نامعتبر از سرور فینوا'); }
+      } catch (e) { if (txt === null && String(e.message) === 'empty') throw new Error('پاسخ خالی از سرور دریافت شد — دوباره تلاش کن.'); }
+      if (!txt) throw new Error('پاسخ نامعتبر از سرور فینوا');
     } else {
       // حالت بومی/سرویس شخصی: OpenAI-compatible (پیش‌فرض رایگان = pollinations)
-      const headers = { 'Content-Type': 'application/json' };
-      if (cfg.apiKey) headers['Authorization'] = 'Bearer ' + cfg.apiKey;
-      const url = /\/chat\/completions$/.test(cfg.baseURL) ? cfg.baseURL : cfg.baseURL + '/chat/completions';
-      const body = JSON.stringify({ model: cfg.model, messages, temperature: 0.6, max_tokens: 1600 });
-      const r = await Bridge.http(url, 'POST', headers, body, 110000);
-      if (!r.ok) {
-        let msg = 'خطای سرویس (' + r.status + ')';
-        try { const j = JSON.parse(r.body); msg = j.error && j.error.message ? j.error.message : (typeof j.error === 'string' ? j.error : msg); } catch (e) {}
-        if (cfg.isDefault) msg += ' — سرویس رایگان موقتاً در دسترس نیست؛ چند لحظه بعد دوباره امتحان کن یا از تنظیمات سرویس شخصی وارد کن.';
-        throw new Error(msg);
-      }
+      const callOpenAI = async (base, model, key) => {
+        const headers = { 'Content-Type': 'application/json' };
+        if (key) headers['Authorization'] = 'Bearer ' + key;
+        const url = /\/chat\/completions$/.test(base) ? base : base + '/chat/completions';
+        const body = JSON.stringify({ model: model, messages, temperature: 0.6, max_tokens: 1600 });
+        return Bridge.http(url, 'POST', headers, body, 110000);
+      };
+      const parse = (r) => {
+        if (!r.ok) throw { status: r.status, body: r.body };
+        try {
+          const j = JSON.parse(r.body);
+          const t = j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+          if (!t) throw { status: 0, body: '' };
+          return t;
+        } catch (e) { if (e && e.status !== undefined) throw e; throw { status: 0, body: String(r.body).slice(0, 200) }; }
+      };
       try {
-        const j = JSON.parse(r.body);
-        txt = j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
-        if (!txt) throw new Error('پاسخ نامعتبر از سرویس');
-      } catch (e) { throw new Error('پارس پاسخ ناموفق بود: ' + String(r.body).slice(0, 200)); }
+        txt = parse(await callOpenAI(cfg.baseURL, cfg.model, cfg.apiKey));
+      } catch (err1) {
+        // زنجیره جایگزین: اگر سرویس شخصی خراب بود → سرویس رایگان؛ اگر رایگان بود → یک تلاش مجدد بعد از ۳ ثانیه
+        if (!cfg.isDefault) {
+          if (onProgress) onProgress('سرویس شخصی پاسخ نداد — تلاش با سرویس رایگان فینوا…');
+          try {
+            txt = parse(await callOpenAI(AI_DEFAULT_BASE, AI_DEFAULT_MODEL, ''));
+          } catch (err2) { throw new Error(faError(err2.status, err2.body, true)); }
+        } else if (err1 && (err1.status === 402 || err1.status === 429 || String(err1.body || '').toLowerCase().includes('free_limit'))) {
+          // محدودیت نرخ → یک تلاش مجدد با فاصله
+          if (onProgress) onProgress('سرویس شلوغ است — تلاش مجدد…');
+          await new Promise(r2 => setTimeout(r2, 4000));
+          try { txt = parse(await callOpenAI(cfg.baseURL, cfg.model, cfg.apiKey)); }
+          catch (err3) { throw new Error(faError(err3.status, err3.body, true)); }
+        } else {
+          throw new Error(faError(err1.status, err1.body, cfg.isDefault));
+        }
+      }
     }
     return txt.trim();
   }
