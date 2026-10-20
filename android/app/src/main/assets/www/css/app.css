@@ -386,3 +386,20 @@ body.light .hero-chip{background:var(--card2)}
 .force-card{background:var(--card); border:1px solid var(--line2); border-radius:var(--r); box-shadow:var(--shadow); padding:20px 16px; max-width:420px; width:100%; max-height:calc(100vh - 40px); overflow-y:auto; animation:slideUp .35s ease}
 .force-card .fu-text{font-size:13px; line-height:2.1; color:var(--txt2); text-align:center; margin:4px 0 10px}
 .force-card .fu-text b{color:var(--pri2)}
+
+/* ═══ v1.4.0 — قیمت‌های زنده + تحلیل سرمایه‌گذاری حرفه‌ای ═══ */
+/* پیل «زنده» با نقطه تپنده */
+.live-pill{display:inline-flex; align-items:center; gap:5px; font-size:10px; font-weight:700; color:var(--ok2); background:rgba(52,211,153,.12); padding:2.5px 9px; border-radius:99px; vertical-align:middle}
+.live-dot{width:6px; height:6px; border-radius:50%; background:var(--ok2); animation:ldPulse 1.6s ease-out infinite; flex:0 0 auto}
+@keyframes ldPulse{0%{box-shadow:0 0 0 0 rgba(52,211,153,.55)} 70%{box-shadow:0 0 0 7px rgba(52,211,153,0)} 100%{box-shadow:0 0 0 0 rgba(52,211,153,0)}}
+/* مهر آخرین بروزرسانی */
+.rate-stamp{font-size:10.5px; color:var(--txt3); text-align:center; margin-top:11px}
+.rate-stamp b{color:var(--txt2)}
+/* جعبه بینش‌های تحلیل سرمایه‌گذاری */
+.insight-box{background:rgba(255,255,255,.03); border:1px solid var(--line); border-radius:var(--r-sm,12px); padding:12px 14px}
+.ins-row{font-size:12px; color:var(--txt2); line-height:2; padding:4px 0; border-bottom:1px dashed var(--line)}
+.ins-row:last-child{border-bottom:0}
+.ins-row b{color:var(--txt)}
+/* بج تغییر (rate-val .d) در حالت روشن هم خوانا باشد */
+body.light .rate-val .d.up{color:#059669}
+body.light .rate-val .d.down{color:#dc2626}

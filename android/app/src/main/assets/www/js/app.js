@@ -5,8 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.3.3';
-  window.__APP_VERSION = APP_VERSION; // برای بروزرسان
+  const APP_VERSION = '1.4.0';
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -45,7 +44,11 @@ const App = (() => {
     try { Splash.step(32, 'باز کردن پایگاه داده…'); } catch (e) {}
     try { await Store.migrateLegacyLocalStorage(); } catch (e) { console.warn('legacy migrate', e); }
     try { state = (await Store.get('kv', 'settings')) || {}; } catch (e) { state = {}; }
-    if (state.v !== 2 || !state.lock) state = Object.assign(defaultState(), state, { v: 2 });
+    // همیشه با مقادیر پیش‌فرض ادغام کن — فیلدهای جدید نسخه‌ها برای کاربران قدیمی هم ساخته شوند
+    state = Object.assign(defaultState(), state, { v: 2 });
+    state.rateAsk = Object.assign({ done: false, laterAt: 0, never: false }, state.rateAsk || {});
+    state.openCount = +(state.openCount || 0) + 1;   // شمارش باز شدن برای دیالوگ امتیاز
+    try { saveState(); } catch (e) {}
     try { Splash.step(56, 'بارگذاری تراکنش‌ها…'); } catch (e) {}
     try { categories = (await Store.all('categories')) || []; } catch (e) { categories = []; }
     if (!categories.length) { categories = DEF_CATEGORIES.slice(); try { await Store.bulkPut('categories', categories); } catch (e) {} }
@@ -75,7 +78,8 @@ const App = (() => {
       aiBaseURL: '', aiApiKey: '', aiModel: '',   // خالی = سرویس رایگان پیش‌فرض فینوا (بدون کلید)
       manualUSD: '', manualGold: '',
       backup: { auto: true, lastAt: 0 },
-      upd: { lastCheck: 0, dismissed: '' },   // بروزرسان: آخرین بررسی + نسخه‌ای که «بعداً» خورده
+      openCount: 0,                                   // چند بار برنامه باز شده (شرط دیالوگ امتیاز)
+      rateAsk: { done: false, laterAt: 0, never: false }, // دیالوگ امتیاز در مایکت
       seedDone: false, notifShown: {},
     };
   }
@@ -93,8 +97,58 @@ const App = (() => {
     autoBackup();
     // قیمت‌ها در پس‌زمینه — داشبورد و تب AI پس از رسیدن رفرش شوند
     AI.fetchRates().then(r => { lastRates = r; App.lastRates = r; if (curTab === 'ai' || curTab === 'dashboard') render(curTab); }).catch(() => {});
-    // بروزرسان: چک ساکت نسخه جدید از گیت‌هاب (هر ۱۲ ساعت + دیالوگ/اورلی اجباری)
-    setTimeout(() => { try { Updater.autoCheck(); } catch (e) { console.warn('upd', e); } }, 2600);
+    // بروزرسانی خودکار و واقعی قیمت‌ها — هر ۶۰ ثانیه (فقط وقتی صفحه دیده می‌شود)
+    setInterval(() => { try { autoRefreshRates(); } catch (e) {} }, 60000);
+    // دیالوگ امتیاز مایکت — بعد از ۷ ثانیه، با شرایط (بار سوم به بعد + حداقل ۵ تراکنش)
+    setTimeout(() => { try { maybeAskRating(); } catch (e) {} }, 7000);
+  }
+
+  /* ───────── قیمت‌های زنده: بروزرسانی خودکار + پچ نرم DOM ───────── */
+  let fetchingRates = false;
+  async function autoRefreshRates() {
+    if (fetchingRates || document.visibilityState !== 'visible') return;
+    if (lastRates && lastRates.ts && Date.now() - lastRates.ts < 50000) return;
+    fetchingRates = true;
+    try {
+      const r = await AI.fetchRates();
+      if (r && (r.usd || r.gold18)) { lastRates = r; App.lastRates = r; patchRateDOM(r); }
+    } catch (e) {}
+    fetchingRates = false;
+  }
+  function relTime(ts) {
+    const d = Date.now() - ts;
+    if (d < 65000) return 'همین حالا';
+    if (d < 3600000) return faDigits(Math.floor(d / 60000)) + ' دقیقه پیش';
+    return faDigits(Math.floor(d / 3600000)) + ' ساعت پیش';
+  }
+  function faN(x) { return faDigits(String(x).replace(/\./g, '٫')); } // عدد با ممیز فارسی
+  /* بج تغییر قیمت (٪ امروز) از داده زنده TGJU */
+  function rateDeltaHTML(key) {
+    const lv = lastRates && lastRates.live && lastRates.live[key];
+    if (!lv || !lv.dp) return '';
+    return lv.dp >= 0
+      ? `<div class="d up">▲ ${faN(lv.dp.toFixed(2))}٪</div>`
+      : `<div class="d down">▼ ${faN(Math.abs(lv.dp).toFixed(2))}٪</div>`;
+  }
+  /* پچ نرم قیمت‌ها در DOM بدون رندر مجدد کل صفحه (تا ورودی کاربر پاک نشود) */
+  function patchRateDOM(r) {
+    if (!r) return;
+    const map = { gold18: r.gold18, goldCoin: r.goldCoin, usd: r.usd, ounce: r.ounce };
+    Object.keys(map).forEach(k => {
+      const el = document.getElementById('rv_' + k);
+      if (el && map[k]) el.textContent = fmtShort(map[k]);
+      const dEl = document.getElementById('rd_' + k);
+      if (dEl) dEl.innerHTML = rateDeltaHTMLFor(r, k);
+    });
+    const st = document.getElementById('rateStamp');
+    if (st && r.ts) st.innerHTML = '🗓 آخرین بروزرسانی: <b>' + relTime(r.ts) + '</b>' + (r.source ? ' • منبع: ' + esc(r.source) : '');
+  }
+  function rateDeltaHTMLFor(r, key) {
+    const lv = r && r.live && r.live[key];
+    if (!lv || !lv.dp) return '';
+    return lv.dp >= 0
+      ? `<div class="d up">▲ ${faN(lv.dp.toFixed(2))}٪</div>`
+      : `<div class="d down">▼ ${faN(Math.abs(lv.dp).toFixed(2))}٪</div>`;
   }
 
   /* ───────── محاسبات ───────── */
@@ -413,7 +467,6 @@ const App = (() => {
     if (tab === 'analytics') renderAnalyticsCharts();
     if (tab === 'ai') bindAIScreen();
     if (tab === 'challenge') bindChallenge();
-    if (tab === 'settings') { try { Updater.renderSettingsArea(); } catch (e) { console.warn('upd area', e); } }
   }
 
   /* ── داشبورد ── */
@@ -460,10 +513,10 @@ const App = (() => {
 
     ${rates && (rates.usd || rates.gold18) ? `
     <div class="card">
-      <div class="card-title">📈 قیمت لحظه‌ای <small style="font-weight:400;color:var(--txt3)">${rates.source || ''}</small></div>
+      <div class="card-title">📈 قیمت لحظه‌ای <span class="live-pill"><i class="live-dot"></i>زنده</span> <small style="font-weight:400;color:var(--txt3)">${rates.source || ''}</small></div>
       <div class="grid2">
-        <div class="rate-card" style="margin:0"><div class="rate-ico gold">🪙</div><div class="rate-main"><div class="t">طلا ۱۸ عیار</div><div class="s">هر گرم</div></div><div class="rate-val"><div class="v">${rates.gold18 ? fmtShort(rates.gold18) : '—'}</div></div></div>
-        <div class="rate-card" style="margin:0"><div class="rate-ico usd">💵</div><div class="rate-main"><div class="t">دلار آمریکا</div><div class="s">آزاد</div></div><div class="rate-val"><div class="v">${rates.usd ? fmtShort(rates.usd) : '—'}</div></div></div>
+        <div class="rate-card" style="margin:0"><div class="rate-ico gold">🪙</div><div class="rate-main"><div class="t">طلا ۱۸ عیار</div><div class="s">هر گرم</div></div><div class="rate-val"><div class="v" id="rv_gold18">${rates.gold18 ? fmtShort(rates.gold18) : '—'}</div><div id="rd_gold18">${rateDeltaHTML('gold18')}</div></div></div>
+        <div class="rate-card" style="margin:0"><div class="rate-ico usd">💵</div><div class="rate-main"><div class="t">دلار آمریکا</div><div class="s">آزاد</div></div><div class="rate-val"><div class="v" id="rv_usd">${rates.usd ? fmtShort(rates.usd) : '—'}</div><div id="rd_usd">${rateDeltaHTML('usd')}</div></div></div>
       </div>
     </div>` : ''}
 
@@ -676,21 +729,43 @@ const App = (() => {
       <div id="aiOnOut"></div>` : ''}
     ${aiTab === 'invest' ? `
       <div class="card glow">
-        <div class="card-title">💰 قیمت لحظه‌ای ${r && r.ts ? `<small style="font-weight:400;color:var(--txt3)">${r.source || ''} ${r.stale ? '• کش قدیمی' : ''}</small>` : ''}</div>
-        <div class="rate-card"><div class="rate-ico gold">🪙</div><div class="rate-main"><div class="t">طلا ۱۸ عیار</div><div class="s">هر گرم • بازار تهران</div></div><div class="rate-val"><div class="v">${r && r.gold18 ? fmtNum(r.gold18) : '—'}</div></div></div>
-        <div class="rate-card"><div class="rate-ico gold">🪙</div><div class="rate-main"><div class="t">سکه تمام</div><div class="s">امامی</div></div><div class="rate-val"><div class="v">${r && r.goldCoin ? fmtNum(r.goldCoin) : '—'}</div></div></div>
-        <div class="rate-card" style="margin-bottom:0"><div class="rate-ico usd">💵</div><div class="rate-main"><div class="t">دلار آمریکا</div><div class="s">بازار آزاد</div></div><div class="rate-val"><div class="v">${r && r.usd ? fmtNum(r.usd) : '—'}</div></div></div>
-        <button class="btn ghost full" id="refreshRates" style="margin-top:12px">🔄 بروزرسانی قیمت‌ها</button>
+        <div class="card-title">💰 قیمت لحظه‌ای واقعی <span class="live-pill"><i class="live-dot"></i>زنده</span> ${r && r.ts ? `<small style="font-weight:400;color:var(--txt3)">${esc(r.source || '')}${r.stale ? ' • کش قدیمی' : ''}</small>` : '<small style="font-weight:400;color:var(--txt3)">در حال دریافت…</small>'}</div>
+        <div class="rate-card"><div class="rate-ico gold">🥇</div><div class="rate-main"><div class="t">طلا ۱۸ عیار</div><div class="s">هر گرم • بازار تهران</div></div><div class="rate-val"><div class="v" id="rv_gold18">${r && r.gold18 ? fmtNum(r.gold18) : '—'}</div><div id="rd_gold18">${rateDeltaHTML('gold18')}</div></div></div>
+        <div class="rate-card"><div class="rate-ico gold">🪙</div><div class="rate-main"><div class="t">سکه تمام امامی</div><div class="s">یک عدد</div></div><div class="rate-val"><div class="v" id="rv_goldCoin">${r && r.goldCoin ? fmtNum(r.goldCoin) : '—'}</div><div id="rd_goldCoin">${rateDeltaHTML('goldCoin')}</div></div></div>
+        <div class="rate-card"><div class="rate-ico usd">💵</div><div class="rate-main"><div class="t">دلار آمریکا</div><div class="s">بازار آزاد</div></div><div class="rate-val"><div class="v" id="rv_usd">${r && r.usd ? fmtNum(r.usd) : '—'}</div><div id="rd_usd">${rateDeltaHTML('usd')}</div></div></div>
+        <div class="rate-card" style="margin-bottom:0"><div class="rate-ico usd">🌐</div><div class="rate-main"><div class="t">انس جهانی طلا</div><div class="s">XAU/USD</div></div><div class="rate-val"><div class="v" id="rv_ounce">${r && r.ounce ? '$' + fmtNum(Math.round(r.ounce)) : '—'}</div><div id="rd_ounce">${rateDeltaHTML('ounce')}</div></div></div>
+        <div class="rate-stamp" id="rateStamp">${r && r.ts ? '🗓 آخرین بروزرسانی: <b>' + relTime(r.ts) + '</b>' + (r.source ? ' • منبع: ' + esc(r.source) : '') : 'هنوز قیمتی دریافت نشده'}</div>
+        <button class="btn ghost full" id="refreshRates" style="margin-top:10px">🔄 بروزرسانی قیمت‌ها</button>
+        <div class="hint" style="text-align:center;margin-top:7px">قیمت‌ها هر ۶۰ ثانیه خودکار بروز می‌شوند • منبع: TGJU</div>
       </div>
       <div class="card">
-        <div class="card-title">📊 روند ۳۰ روز اخیر</div>
+        <div class="card-title">📊 مقایسه روند رشد دارایی‌ها</div>
+        <div class="chips" style="margin-bottom:10px">
+          <button class="chip ${investRange === 'live' ? 'on' : ''}" data-ir="live">زنده</button>
+          <button class="chip ${investRange === '1m' ? 'on' : ''}" data-ir="1m">۱ ماه</button>
+          <button class="chip ${investRange === '3m' ? 'on' : ''}" data-ir="3m">۳ ماه</button>
+        </div>
         <div class="chart-box" id="rateChart"></div>
-        <div class="legend"><span><i style="background:var(--gold)"></i>طلا ۱۸</span><span><i style="background:var(--usd)"></i>دلار</span></div>
+        <div class="legend" id="rateLegend"></div>
+        <div class="hint" style="margin-top:8px">نمودار «رشد» هر دارایی نسبت به ابتدای بازه (٪) نشان می‌دهد — هرچه خط بالاتر، سود بیشتر.</div>
       </div>
       <div class="card">
-        <div class="card-title">🧮 تحلیل سریع: طلا یا دلار؟</div>
+        <div class="card-title">🧮 اگر قبلاً می‌خریدی؟ (حساب‌گر سود)</div>
+        <div class="field-inline">
+          <div class="field"><label>مبلغ (تومان)</label><input id="wfAmt" type="number" dir="ltr" placeholder="۵۰۰۰۰۰۰" value="5000000"></div>
+          <div class="field"><label>فاصله زمانی</label>
+            <select id="wfDays"><option value="7">۷ روز قبل</option><option value="30" selected>۳۰ روز قبل</option><option value="90">۹۰ روز قبل</option></select></div>
+          <div class="field"><label>دارایی</label>
+            <select id="wfAsset"><option value="gold18">طلا ۱۸ عیار</option><option value="goldCoin">سکه امامی</option><option value="usd">دلار</option></select></div>
+        </div>
+        <button class="btn full" id="wfBtn">محاسبه سود / زیان</button>
+        <div id="wfOut" style="margin-top:12px"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">🧠 تحلیل سریع: طلا یا دلار؟</div>
         <div id="quickInvest"></div>
-        <button class="btn full" id="investAIBtn">🤖 تحلیل هوشمند با هوش مصنوعی آنلاین</button>
+        <div id="investInsights" style="margin-top:12px"></div>
+        <button class="btn full" id="investAIBtn" style="margin-top:12px">🤖 تحلیل هوشمند با هوش مصنوعی آنلاین</button>
       </div>
       <div id="aiInvestOut"></div>` : ''}`;
   }
@@ -727,13 +802,28 @@ const App = (() => {
       }
     }
     if (aiTab === 'invest') {
-      drawRateHistory();
+      drawInvestChart();
       quickInvest();
+      renderInsights();
       document.getElementById('refreshRates').onclick = async (e) => {
-        const btn = e.target; btn.textContent = '⏳ در حال دریافت…';
-        lastRates = await AI.fetchRates(); App.lastRates = lastRates;
-        render('ai');
+        const btn = e.target;
+        btn.disabled = true; btn.textContent = '⏳ در حال دریافت قیمت‌های واقعی…';
+        try {
+          const r = await AI.fetchRates();
+          if (r && (r.usd || r.gold18 || r.goldCoin)) {
+            lastRates = r; App.lastRates = r;
+            btn.textContent = '🔄 بروزرسانی قیمت‌ها';
+            patchRateDOM(r); quickInvest(); renderInsights(); drawInvestChart();
+            UI.toast('قیمت‌های واقعی بروزرسانی شد ✅', 'ok');
+          } else {
+            btn.textContent = '🔄 بروزرسانی قیمت‌ها';
+            UI.toast('دریافت قیمت ناموفق بود — اتصال اینترنت را بررسی کن', 'bad');
+          }
+        } catch (err) { btn.textContent = '🔄 بروزرسانی قیمت‌ها'; UI.toast('خطا در دریافت قیمت', 'bad'); }
+        btn.disabled = false;
       };
+      document.querySelectorAll('[data-ir]').forEach(b => b.onclick = () => { investRange = b.dataset.ir; render('ai'); });
+      document.getElementById('wfBtn').onclick = whatIfCalc;
       document.getElementById('investAIBtn').onclick = async () => {
         const out = document.getElementById('aiInvestOut');
         out.innerHTML = `<div class="ai-think">🧠 تحلیل طلا و دلار <span class="dots-anim"><span>•</span><span>•</span><span>•</span></span></div>`;
@@ -746,40 +836,158 @@ const App = (() => {
       };
     }
   }
-  async function drawRateHistory() {
-    const hist = await AI.rateHistory();
+  /* ───────── نمودار مقایسه رشد دارایی‌ها (٪ نسبت به ابتدای بازه) ───────── */
+  let investRange = 'live';
+  async function drawInvestChart() {
     const el = document.getElementById('rateChart');
     if (!el) return;
-    if (hist.length < 2) { el.innerHTML = '<div class="empty">با هر بار باز کردن اپ، قیمت‌ها ذخیره می‌شوند و روند اینجا نمایش داده می‌شود 📈</div>'; return; }
-    const W = Math.min(el.clientWidth || 340, 800), H = 190;
+    let hist;
+    if (investRange === 'live') hist = await AI.snapHistory();
+    else {
+      const daily = await AI.rateHistory();
+      hist = (investRange === '1m' ? daily.slice(-30) : daily.slice(-90)).map(d => ({ ts: d.ts, day: d.day, usd: d.usd, gold18: d.gold18, goldCoin: d.goldCoin }));
+    }
+    if (!hist || hist.length < 2) {
+      el.innerHTML = `<div class="empty"><div class="big">📈</div>${investRange === 'live' ? 'داده زنده در حال جمع شدن است — چند دقیقه صبر کن یا «بروزرسانی قیمت‌ها» را بزن' : 'با هر بار باز کردن اپ، قیمت‌ها ذخیره می‌شوند و روند اینجا ساخته می‌شود'}</div>`;
+      const lg = document.getElementById('rateLegend'); if (lg) lg.innerHTML = '';
+      return;
+    }
+    const W = Math.max(120, Math.min(el.clientWidth || 340, 800)), H = 210;
     const dpr = window.devicePixelRatio || 1;
-    const c = document.createElement('canvas'); c.width = W * dpr; c.height = H * dpr; c.style.height = H + 'px';
+    const c = document.createElement('canvas'); c.width = W * dpr; c.height = H * dpr;
+    c.style.width = W + 'px'; c.style.height = H + 'px';
     const ctx = c.getContext('2d'); ctx.scale(dpr, dpr);
-    const pad = { t: 16, b: 24, l: 6, r: 6 };
+    const pad = { t: 14, b: 24, l: 8, r: 8 };
     const series = [
-      { key: 'gold18', color: cssv('--gold') },
-      { key: 'usd', color: cssv('--usd') },
+      { key: 'gold18', color: cssv('--gold') || '#eab308', label: 'طلا ۱۸' },
+      { key: 'goldCoin', color: '#f59e0b', label: 'سکه' },
+      { key: 'usd', color: cssv('--usd') || '#38bdf8', label: 'دلار' },
     ];
+    const n = hist.length;
+    const growth = {}; // کلید → [٪ رشد هر نقطه]
+    const changes = {};
     series.forEach(s => {
-      const vals = hist.map(h => h[s.key]).filter(v => v > 0);
-      if (vals.length < 2) return;
-      const maxV = Math.max(...vals) * 1.05, minV = Math.min(...vals) * 0.95;
-      const pts = hist.map((h, i) => h[s.key] > 0 ? {
-        x: pad.l + (W - pad.l - pad.r) * (i / (hist.length - 1)),
-        y: pad.t + (H - pad.t - pad.b) * (1 - (h[s.key] - minV) / (maxV - minV)),
-      } : null).filter(Boolean);
-      if (pts.length < 2) return;
-      Charts.trend ? null : null;
-      ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.beginPath();
-      pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
-      pts.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, 7); ctx.fillStyle = s.color; ctx.fill(); });
+      const vals = hist.map(h => +(h[s.key]) || 0);
+      const i0 = vals.findIndex(v => v > 0);
+      if (i0 < 0) return;
+      const base = vals[i0];
+      growth[s.key] = vals.map((v, i) => i < i0 ? null : (v > 0 ? (v / base - 1) * 100 : null));
+      changes[s.key] = (vals[n - 1] / base - 1) * 100;
     });
-    ctx.fillStyle = cssv('--txt3'); ctx.font = '9px Vazirmatn,Tahoma';
-    ctx.textAlign = 'center';
-    [0, Math.floor(hist.length / 2), hist.length - 1].forEach(i => {
-      if (hist[i]) ctx.fillText(faDigits(hist[i].day.split('/')[1] + '/' + hist[i].day.split('/')[2]), pad.l + (W - pad.l - pad.r) * (i / (hist.length - 1)), H - 6);
+    const all = [];
+    Object.keys(growth).forEach(k => growth[k].forEach(v => { if (v !== null) all.push(v); }));
+    if (!all.length) { el.innerHTML = '<div class="empty">داده کافی نیست</div>'; return; }
+    let maxV = Math.max(0.5, ...all) * 1.12, minV = Math.min(-0.5, ...all) * 1.12;
+    const X = (i) => pad.l + (W - pad.l - pad.r) * (i / (n - 1));
+    const Y = (v) => pad.t + (H - pad.t - pad.b) * (1 - (v - minV) / (maxV - minV));
+    // خط صفر + خطوط راهنما
+    ctx.setLineDash([4, 5]); ctx.lineWidth = 1; ctx.strokeStyle = cssv('--line') || 'rgba(255,255,255,.14)';
+    ctx.beginPath(); ctx.moveTo(pad.l, Y(0)); ctx.lineTo(W - pad.r, Y(0)); ctx.stroke();
+    [0.5, 1].forEach(f => { const v = minV + (maxV - minV) * f; ctx.beginPath(); ctx.moveTo(pad.l, Y(v)); ctx.lineTo(W - pad.r, Y(v)); ctx.stroke(); });
+    ctx.setLineDash([]);
+    // خطوط سری‌ها
+    const legendParts = [];
+    series.forEach(s => {
+      const g = growth[s.key];
+      if (!g) return;
+      ctx.strokeStyle = s.color; ctx.lineWidth = 2.2; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      let started = false;
+      g.forEach((v, i) => {
+        if (v === null) return;
+        if (!started) { ctx.moveTo(X(i), Y(v)); started = true; } else ctx.lineTo(X(i), Y(v));
+      });
+      ctx.stroke();
+      const lastI = (() => { for (let i = g.length - 1; i >= 0; i--) if (g[i] !== null) return i; return -1; })();
+      if (lastI >= 0) {
+        ctx.beginPath(); ctx.arc(X(lastI), Y(g[lastI]), 3.5, 0, 7); ctx.fillStyle = s.color; ctx.fill();
+      }
+      legendParts.push(`<span><i style="background:${s.color}"></i>${s.label} <b style="color:${changes[s.key] >= 0 ? 'var(--ok2)' : 'var(--bad2)'}">${changes[s.key] >= 0 ? '+' : '−'}${faN(Math.abs(changes[s.key]).toFixed(1))}٪</b></span>`);
+    });
+    // برچسب‌های محور افقی
+    ctx.fillStyle = cssv('--txt3') || '#5f7396'; ctx.font = '9px Vazirmatn,Tahoma'; ctx.textAlign = 'center';
+    [0, Math.floor(n / 2), n - 1].forEach(i => {
+      const lbl = investRange === 'live'
+        ? new Date(hist[i].ts).toTimeString().slice(0, 5)
+        : faDigits((hist[i].day || '').split('/')[1] + '/' + (hist[i].day || '').split('/')[2]);
+      ctx.fillText(faDigits(lbl), X(i), H - 6);
     });
     el.innerHTML = ''; el.appendChild(c);
+    const lg = document.getElementById('rateLegend');
+    if (lg) lg.innerHTML = legendParts.join('');
+  }
+  /* ───────── حساب‌گر «اگر قبلاً می‌خریدی؟» ───────── */
+  async function whatIfCalc() {
+    const el = document.getElementById('wfOut');
+    if (!el) return;
+    const amt = Math.max(0, +(document.getElementById('wfAmt').value || 0));
+    const days = +(document.getElementById('wfDays').value || 30);
+    const asset = document.getElementById('wfAsset').value;
+    const names = { gold18: 'طلا ۱۸ عیار (گرم)', goldCoin: 'سکه امامی (عدد)', usd: 'دلار ( عدد)' };
+    const units = { gold18: 'گرم', goldCoin: 'سکه', usd: 'دلار' };
+    if (!amt) { el.innerHTML = '<div class="hint">مبلغ را وارد کن</div>'; return; }
+    const r = lastRates;
+    const nowP = r && { gold18: r.gold18, goldCoin: r.goldCoin, usd: r.usd }[asset];
+    if (!nowP) { el.innerHTML = '<div class="hint">قیمت فعلی در دسترس نیست — دکمه بروزرسانی را بزن</div>'; return; }
+    // قیمت گذشته از تاریخچه روزانه — نزدیک‌ترین رکورد به فاصله درخواستی
+    const hist = await AI.rateHistory();
+    let pastP = 0, pastLabel = '';
+    if (hist.length >= 2) {
+      const target = hist[Math.max(0, hist.length - 1 - days)];
+      const src = target[asset] > 0 ? target : hist.find(h => h[asset] > 0);
+      if (src) { pastP = src[asset]; pastLabel = jDateLabel(src.day); }
+    }
+    if (!pastP) {
+      el.innerHTML = `<div class="hint">برای محاسبه دقیق، تاریخچه ${faDigits(days)} روز لازم است — تاریخچه با هر بروزرسانی قیمت کامل‌تر می‌شود. 📈</div>`;
+      return;
+    }
+    const qty = amt / pastP;
+    const nowVal = qty * nowP;
+    const profit = nowVal - amt;
+    const pct = profit / amt * 100;
+    const good = profit >= 0;
+    el.innerHTML = `
+      <div class="grid2" style="margin-bottom:10px">
+        <div class="stat"><div class="k">قیمت ${pastLabel}</div><div class="v" style="font-size:15px">${fmtShort(pastP)}</div><div class="sub">تومان</div></div>
+        <div class="stat"><div class="k">قیمت امروز</div><div class="v" style="font-size:15px">${fmtShort(nowP)}</div><div class="sub">تومان</div></div>
+      </div>
+      <div class="stat" style="margin-bottom:10px"><div class="k">امروز می‌داشتی</div>
+        <div class="v" style="color:${good ? 'var(--ok2)' : 'var(--bad2)'}">${good ? '+' : '−'}${fmtShort(Math.abs(profit))} <small>تومان</small></div>
+        <div class="sub">${faN(pct.toFixed(1))}٪ ${good ? 'سود ✅' : 'زیان'} در ${faDigits(days)} روز • معادل ${faN(qty >= 100 ? Math.round(qty) : qty.toFixed(2))} ${units[asset]}</div></div>
+      <p class="hint" style="margin:0">${good ? 'این دارایی در این بازه از تورم عقب نمانده.' : 'این دارایی در این بازه عملکرد ضعیف‌تری داشته — مقایسه با دارایی‌های دیگر را در نمودار ببین.'}</p>`;
+  }
+  /* ───────── بینش‌های خودکار تحلیل سرمایه‌گذاری ───────── */
+  async function renderInsights() {
+    const el = document.getElementById('investInsights');
+    if (!el) return;
+    const r = lastRates;
+    if (!r || !(r.usd || r.gold18)) { el.innerHTML = ''; return; }
+    const lines = [];
+    const hist = await AI.rateHistory();
+    if (hist.length >= 3) {
+      const first = hist[0], last = hist[hist.length - 1];
+      const rows = [['gold18', 'طلا ۱۸', '🥇'], ['goldCoin', 'سکه', '🪙'], ['usd', 'دلار', '💵']];
+      let best = null;
+      rows.forEach(([k, name, ico]) => {
+        if (first[k] && last[k]) {
+          const ch = (last[k] / first[k] - 1) * 100;
+          lines.push(`${ch >= 0 ? '📈' : '📉'} <b>${name}</b> در ${faDigits(hist.length)} روز اخیر: ${ch >= 0 ? '+' : '−'}${faN(Math.abs(ch).toFixed(1))}٪`);
+          if (!best || Math.abs(ch) > Math.abs(best.ch)) best = { name, ch, ico };
+        }
+      });
+      if (best) lines.push(`${best.ch >= 0 ? '🏆' : '🛡'} بهترین عملکرد بازه: <b>${best.name}</b> (${best.ch >= 0 ? '+' : '−'}${faN(Math.abs(best.ch).toFixed(1))}٪)`);
+    }
+    // اختلاف طلای ایران با قیمت جهانی (انس × دلار)
+    if (r.ounce && r.usd && r.gold18) {
+      const worldG24 = r.ounce / 31.1035 * r.usd;
+      const impliedG18 = worldG24 * 0.916 * 1.07; // عیار ۱۸ + اجرت ~۷٪
+      const prem = (r.gold18 / impliedG18 - 1) * 100;
+      lines.push(prem >= 0
+        ? `🌐 طلای ایران حدود <b>${faN(prem.toFixed(1))}٪</b> گران‌تر از معادل جهانی معامله می‌شود (حباب بازار داخلی)`
+        : `🌐 طلای ایران حدود <b>${faN(Math.abs(prem).toFixed(1))}٪</b> ارزان‌تر از معادل جهانی است`);
+    }
+    lines.push('💡 راهبرد: خرید پله‌ای (DCA) — مبلغ را به ۳ قسمت تقسیم کن و در افت‌ها بخر، نه یکجا در قله.');
+    el.innerHTML = `<div class="insight-box">${lines.map(l => `<div class="ins-row">${l}</div>`).join('')}</div>`;
   }
   function cssv(v) { return getComputedStyle(document.body).getPropertyValue(v).trim(); }
   function quickInvest() {
@@ -791,17 +999,56 @@ const App = (() => {
     const investable = Math.max(0, bal - txs.filter(t => t.type === 'installment' && t.status === 'pending').reduce((a, t) => a + t.amount * t.rate, 0));
     const goldGr = Math.floor(investable / r.gold18 * 100) / 100;
     const usdN = Math.floor(investable / r.usd * 10) / 10;
-    const hist = AI.rateHistory ? null : null;
+    const coinN = r.goldCoin ? Math.floor(investable / r.goldCoin) : 0;
     el.innerHTML = `
       <div class="grid2" style="margin-bottom:12px">
         <div class="stat"><div class="k">قابل سرمایه‌گذاری</div><div class="v">${fmtShort(investable)} ت</div><div class="sub">بعد از کسر اقساط</div></div>
-        <div class="stat"><div class="k">قدرت خرید</div><div class="v">${faDigits(goldGr)} گرم طلا</div><div class="sub">یا ${faDigits(usdN)} دلار</div></div>
+        <div class="stat"><div class="k">قدرت خرید</div><div class="v">${faN(goldGr)} گرم طلا</div><div class="sub">یا ${faN(usdN)} دلار${coinN ? ' یا ' + faDigits(coinN) + ' سکه' : ''}</div></div>
       </div>
       <p style="font-size:12.5px;color:var(--txt2);line-height:2;margin:0">
       • طلا ۱۸ عیار: <b style="color:var(--gold)">${fmtToman(r.gold18)}</b> — تاریخی‌ترین سپر تورم در ایران، نقدشوندگی بالا در صرافی‌ها.<br>
       • دلار: <b style="color:var(--usd)">${fmtToman(r.usd)}</b> — نوسان سیاسی/اخباری شدیدتر، ریسک مقرراتی بیشتر.<br>
       • راهبرد پیشنهادی: تقسیم گام‌به‌گام (مثلاً ۷۰٪ طلا / ۳۰٪ دلار در ۳ مرحله) و پرهیز از خرید یکجایی در قله قیمت.
       </p>`;
+  }
+
+  /* ═══ امتیاز در مایکت — دیالوگ رضایت + اینتنت myket://comment?id=com.finova.money ═══ */
+  function maybeAskRating() {
+    if (!unlocked || document.hidden) { setTimeout(() => { try { maybeAskRating(); } catch (e) {} }, 20000); return; }
+    const ra = state.rateAsk || {};
+    if (ra.done || ra.never) return;                       // قبلاً امتیاز داده یا انصراف قطعی
+    if (ra.laterAt && Date.now() < ra.laterAt) return;     // در دوره «بعداً»
+    if ((state.openCount || 0) < 3) return;                // حداقل بار سوم باز شدن
+    if ((txs || []).length < 5) return;                    // حداقل کمی از اپ استفاده کرده باشد
+    showRatingDialog('auto');
+  }
+  function showRatingDialog(source) {
+    const m = UI.modal('⭐ نظرت درباره فینوا چیه؟', `
+      <div style="text-align:center">
+        <div style="font-size:40px;line-height:1.3;letter-spacing:4px">⭐⭐⭐⭐⭐</div>
+        <p style="font-size:13px;color:var(--txt2);line-height:2;margin:12px 0 4px">${source === 'auto' ? 'از اینکه فینوا را انتخاب کردی ممنونیم 💙<br>' : ''}اگر از برنامه راضی هستی، با ثبت <b>امتیاز و تجربه‌ات در مایکت</b> به بهتر شدن فینوا و انتخاب کاربران دیگر کمک کن.</p>
+      </div>
+      <div class="btn-row" style="margin-top:14px"><button class="btn full" id="mkYes">⭐ ثبت امتیاز در مایکت</button></div>
+      <div class="btn-row" style="margin-top:9px"><button class="btn ghost" id="mkLater">بعداً یادآوری کن</button><button class="btn ghost" id="mkNever">نه، ممنون</button></div>`);
+    m.querySelector('#mkYes').onclick = () => {
+      state.rateAsk = Object.assign(state.rateAsk || {}, { done: true, laterAt: 0 });
+      saveState();
+      m.remove();
+      openMyket();
+    };
+    m.querySelector('#mkLater').onclick = () => {
+      state.rateAsk = Object.assign(state.rateAsk || {}, { laterAt: Date.now() + 14 * 864e5 });
+      saveState(); m.remove();
+      UI.toast('۱۴ روز دیگر یادت می‌اندازیم 🙌', 'ok');
+    };
+    m.querySelector('#mkNever').onclick = () => {
+      state.rateAsk = Object.assign(state.rateAsk || {}, { never: true });
+      saveState(); m.remove();
+    };
+  }
+  function openMyket() {
+    try { if (Bridge.openMyketRating) { Bridge.openMyketRating(); UI.toast('ممنون از حمایتت 🌟', 'ok'); return; } } catch (e) {}
+    try { window.open('https://myket.ir/app/com.finova.money', '_blank', 'noopener'); } catch (e) {}
   }
 
   /* ── بودجه ── */
@@ -998,10 +1245,9 @@ const App = (() => {
       <div class="list" style="margin-top:10px">${categories.map(c => `<div class="row-item"><div class="row-ico">${c.icon}</div><div class="row-main"><div class="t">${esc(c.name)}</div><div class="s">${c.type === 'income' ? 'درآمد' : c.essential ? 'هزینه ضروری' : 'هزینه'} </div></div></div>`).join('')}</div>
     </div>
     <div class="card">
-      <div class="card-title">🔄 بروزرسانی برنامه <span class="ai-badge on" id="updBadge">نسخه ${faDigits(APP_VERSION)}</span></div>
-      <div id="updArea"><div class="hint" style="text-align:center">برای بررسی نسخه جدید از گیت‌هاب، دکمه زیر را بزن</div>
-        <button class="btn full" id="checkUpdBtn" style="margin-top:8px">🔄 بررسی بروزرسانی</button>
-      </div>
+      <div class="card-title">⭐ حمایت از فینوا</div>
+      <p style="font-size:12.5px;color:var(--txt2);line-height:2;margin:0 0 10px">اگر فینوا مدیریت مالی‌ات را بهتر کرده، با یک <b>امتیاز و نظر در مایکت</b> به بهتر شدن برنامه و انتخاب کاربران دیگر کمک کن 🙏</p>
+      <button class="btn full" id="rateMyketBtn">⭐ امتیاز و نظر در مایکت</button>
     </div>
     <div class="card">
       <img src="img/logo.png" alt="فینوا" style="display:block;width:64px;height:64px;margin:2px auto 10px;filter:drop-shadow(0 0 14px rgba(34,211,238,.35))">
@@ -1077,6 +1323,7 @@ const App = (() => {
       return;
     }
     if (t.closest('#saveRatesBtn')) { state.manualUSD = document.getElementById('mUSD').value; state.manualGold = document.getElementById('mGold').value; saveState(); return UI.toast('ذخیره شد', 'ok'); }
+    if (t.closest('#rateMyketBtn')) return showRatingDialog('settings');
     if (t.closest('#bkEncBtn')) return backupFile(true);
     if (t.closest('#bkPlainBtn')) return backupFile(false);
     if (t.closest('#restoreBtn')) return pickFileAndRestore();

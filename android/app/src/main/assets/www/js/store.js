@@ -1,7 +1,7 @@
 /* ═══════════ لایه ذخیره‌سازی — IndexedDB با مهاجرت و پاک‌سازی واقعی ═══════════ */
 const Store = (() => {
   const DB_NAME = 'finova-db';
-  const DB_VER = 3;
+  const DB_VER = 4;
   let _db = null;
 
   function openOnce(timeoutMs) {
@@ -30,6 +30,8 @@ const Store = (() => {
             }
             // v2+: تاریخچه قیمت‌ها — همیشه بررسی می‌شود تا نصب تازه و دیتابیس‌های ناقص هم ساخته شوند (رفع باگ)
             if (!db.objectStoreNames.contains('rateHistory')) db.createObjectStore('rateHistory', { keyPath: 'day' });
+            // v4+: اسنپ‌شات زنده قیمت‌ها داخل‌روزی (نمودار «زنده» تحلیل سرمایه‌گذاری)
+            if (!db.objectStoreNames.contains('rateSnap')) db.createObjectStore('rateSnap', { keyPath: 'ts' });
           } catch (err) { console.error('migrate err', err); }
         };
         req.onsuccess = () => { clearTimeout(timer); done(resolve, req.result); };
@@ -78,7 +80,7 @@ const Store = (() => {
     },
     // پاک‌سازی کامل و واقعی همه داده‌ها (رفع باگ «پاک نشدن با ری‌استارت»)
     async wipeAll() {
-      const stores = ['kv','transactions','rules','budgets','goals','wallets','categories','receipts','backups','rates','rateHistory'];
+      const stores = ['kv','transactions','rules','budgets','goals','wallets','categories','receipts','backups','rates','rateHistory','rateSnap'];
       for (const s of stores) { try { await this.clear(s); } catch (e) { console.warn('wipe', s, e); } }
       try { localStorage.removeItem('finova-storage-v1'); localStorage.clear(); } catch (e) {}
       try { sessionStorage.clear(); } catch (e) {}

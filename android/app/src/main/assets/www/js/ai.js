@@ -1,27 +1,79 @@
-/* ═══════════ هوش مصنوعی دوگانه (آفلاین + آنلاین) + قیمت لحظه‌ای طلا و دلار ═══════════ */
+/* ═══════════ هوش مصنوعی دوگانه (آفلاین + آنلاین) + قیمت لحظه‌ای واقعی طلا و دلار ═══════════ */
 const AI = (() => {
 
-  /* ─────────── دریافت قیمت لحظه‌ای (TGJU اصلی، نوبیتکس پشتیبان) ─────────── */
+  /* ─────────── دریافت قیمت لحظه‌ای واقعی ───────────
+     منبع اصلی: TGJU (۶ آینه — server mirror list) | پشتیبان: نوبیتکس | پشتیبان دوم: مقادیر دستی کاربر
+     همه قیمت‌ها ریال هستند و به تومان تبدیل می‌شوند (÷۱۰)؛ انس جهانی به دلار باقی می‌ماند. */
+  const TGJU_MIRRORS = [
+    'https://call1.tgju.org/ajax.json',
+    'https://call2.tgju.org/ajax.json',
+    'https://call3.tgju.org/ajax.json',
+    'https://call4.tgju.org/ajax.json',
+    'https://call5.tgju.org/ajax.json',
+    'https://call6.tgju.org/ajax.json',
+  ];
+  const NUM = (s) => parseFloat(String(s == null ? '' : s).replace(/,/g, '')) || 0;
+
+  /* استخراج کامل یک ردیف TGJU: قیمت + تغییر + درصد + سقف/کف + ساعت */
+  function tgjuRow(it, toToman) {
+    if (!it || NUM(it.p) <= 0) return null;
+    const k = toToman ? 10 : 1;
+    return {
+      v: Math.round(NUM(it.p) / k),
+      d: NUM(it.d) / k,
+      dp: +it.dp || 0,
+      up: (+it.dp || 0) >= 0,
+      h: NUM(it.h) / k, l: NUM(it.l) / k,
+      t: it.t_en || '',
+    };
+  }
+  function parseTgju(items) {
+    const out = {};
+    const g18 = tgjuRow(items['geram18'], true);
+    if (g18) out.gold18 = g18;
+    const coin = tgjuRow(items['sekee'], true);
+    if (coin) out.goldCoin = coin;
+    const nim = tgjuRow(items['nim'], true);
+    if (nim) out.nim = nim;
+    const rob = tgjuRow(items['rob'], true);
+    if (rob) out.rob = rob;
+    const mes = tgjuRow(items['mesghal'], true);
+    if (mes) out.mesghal = mes;
+    const usd = tgjuRow(items['price_dollar_rl'], true);
+    if (usd) out.usd = usd;
+    const ons = tgjuRow(items['ons'], false); // انس جهانی به دلار — بدون تبدیل
+    if (ons) out.ounce = ons;
+    return out;
+  }
+
   async function fetchRates() {
     const cached = await Store.get('rates', 'latest');
-    const result = { usd: null, gold18: null, goldCoin: null, mesghal: null, ts: 0, source: '', stale: false };
-    // ۱) TGJU — طلا + دلار (یک درخواست، دارای CORS برای مرورگر)
-    try {
-      const r2 = await Bridge.http('https://call5.tgju.org/ajax.json', 'GET', null, null, 15000);
-      if (r2.ok && r2.body) {
-        const j2 = JSON.parse(r2.body);
-        const items = j2 && j2.current || {};
-        const g18 = items['geram18'] && parseFloat(String(items['geram18'].p).replace(/,/g, ''));
-        const coin = items['sekee'] && parseFloat(String(items['sekee'].p).replace(/,/g, ''));
-        const mes = items['mesghal'] && parseFloat(String(items['mesghal'].p).replace(/,/g, ''));
-        const usdT = items['price_dollar_rl'] && parseFloat(String(items['price_dollar_rl'].p).replace(/,/g, ''));
-        if (g18 > 0) { result.gold18 = Math.round(g18 / 10); result.ts = Date.now(); result.source = 'TGJU'; }
-        if (coin > 0) result.goldCoin = Math.round(coin / 10);
-        if (mes > 0) result.mesghal = Math.round(mes / 10);
-        if (usdT > 0 && !result.usd) { result.usd = Math.round(usdT / 10); result.ts = Math.max(result.ts, Date.now()); }
-      }
-    } catch (e) {}
-    // ۲) نوبیتکس — دلار/تتر به ریال (پشتیبان؛ در APK بدون محدودیت CORS)
+    const result = { usd: null, gold18: null, goldCoin: null, nim: null, rob: null, mesghal: null, ounce: null, ts: 0, source: '', stale: false, live: {} };
+
+    // ۱) TGJU — تلاش روی آینه‌های متعدد تا اولین پاسخ سالم
+    for (let i = 0; i < TGJU_MIRRORS.length; i++) {
+      try {
+        const r = await Bridge.http(TGJU_MIRRORS[i], 'GET', null, null, 9000);
+        if (r.ok && r.body && r.body.length > 500) {
+          const j = JSON.parse(r.body);
+          const parsed = parseTgju((j && j.current) || {});
+          if (parsed.gold18 || parsed.usd || parsed.goldCoin) {
+            result.live = parsed; result.source = 'TGJU';
+            break;
+          }
+        }
+      } catch (e) { /* آینه بعدی */ }
+    }
+    const lv = result.live;
+    if (lv.gold18) { result.gold18 = lv.gold18.v; result.ts = Date.now(); }
+    if (lv.goldCoin) result.goldCoin = lv.goldCoin.v;
+    if (lv.nim) result.nim = lv.nim.v;
+    if (lv.rob) result.rob = lv.rob.v;
+    if (lv.mesghal) result.mesghal = lv.mesghal.v;
+    if (lv.usd) { result.usd = lv.usd.v; result.ts = Math.max(result.ts, Date.now()); }
+    if (lv.ounce) result.ounce = lv.ounce.v;
+
+    // ۲) نوبیتکس — پشتیبان دلار/تتر به ریال
     if (!result.usd) {
       try {
         const r = await Bridge.http('https://api.nobitex.ir/market/stats?srcCurrency=usdt,btc&dstCurrency=rls', 'GET', null, null, 12000);
@@ -34,16 +86,29 @@ const AI = (() => {
         }
       } catch (e) {}
     }
-    // دستی‌های کاربر اگر API کار نکرد
+    // ۳) مقادیر دستی کاربر اگر API کار نکرد
     const st = App && App.state ? App.state : {};
     if (!result.usd && st.manualUSD) { result.usd = +st.manualUSD; result.source = 'دستی'; }
     if (!result.gold18 && st.manualGold) { result.gold18 = +st.manualGold; result.source = 'دستی'; }
-    // کش
+
+    // ۴) کش: آخرین قیمت + تاریخچه روزانه + اسنپ‌شات زنده داخل‌روزی
     if (result.usd || result.gold18) {
       const val = { key: 'latest', ...result, savedAt: Date.now() };
       await Store.put('rates', val);            // keyPath inline ('key') — کلید صریح DataError می‌داد (رفع باگ قیمت‌ها)
       const day = jKey(jToday());
-      await Store.put('rateHistory', { day, usd: result.usd, gold18: result.gold18, ts: Date.now() }); // keyPath inline ('day')
+      await Store.put('rateHistory', { day, usd: result.usd, gold18: result.gold18, goldCoin: result.goldCoin, ounce: result.ounce, ts: Date.now() });
+      // اسنپ‌شات زنده — حداکثر هر ۲ دقیقه یک‌بار، سقف ۵۰۰ رکورد (نمودار «زنده»)
+      try {
+        const snaps = ((await Store.all('rateSnap')) || []).sort((a, b) => a.ts - b.ts);
+        const last = snaps[snaps.length - 1];
+        if (!last || Date.now() - last.ts >= 120000) {
+          const snap = { ts: Date.now(), usd: result.usd || 0, gold18: result.gold18 || 0, goldCoin: result.goldCoin || 0, ounce: result.ounce || 0 };
+          await Store.put('rateSnap', snap);
+          snaps.push(snap);
+          const over = snaps.length - 500;
+          for (let k = 0; k < over; k++) { try { await Store.del('rateSnap', snaps[k].ts); } catch (e2) {} }
+        }
+      } catch (e) {}
       return val;
     }
     if (cached) return { ...cached, stale: true, source: (cached.source || '') + ' (کش)' };
@@ -52,7 +117,12 @@ const AI = (() => {
   async function rateHistory() {
     const rows = await Store.all('rateHistory');
     rows.sort((a, b) => a.day.localeCompare(b.day));
-    return rows.slice(-30);
+    return rows.slice(-120);
+  }
+  async function snapHistory() {
+    const rows = await Store.all('rateSnap');
+    rows.sort((a, b) => a.ts - b.ts);
+    return rows.slice(-500);
   }
 
   /* ─────────── موتور آفلاین — تحلیلگر قاعده‌محور ─────────── */
@@ -314,5 +384,5 @@ const AI = (() => {
     return txt.trim();
   }
 
-  return { fetchRates, rateHistory, offlineAnswer, onlineAnswer, buildContext, aiConfig };
+  return { fetchRates, rateHistory, snapHistory, offlineAnswer, onlineAnswer, buildContext, aiConfig };
 })();
