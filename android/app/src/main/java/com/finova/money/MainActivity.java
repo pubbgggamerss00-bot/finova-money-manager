@@ -423,6 +423,28 @@ public class MainActivity extends Activity {
             });
         }
 
+        /* ═══ خرید درون‌برنامه‌ای — باز کردن صفحه برنامه در مایکت ═══
+           myket://app?id=<package> — اگر اپ مایکت نبود → سایت مایکت */
+        @JavascriptInterface
+        public void openMyketApp() {
+            main.post(() -> {
+                try {
+                    String url = "myket://app?id=com.finova.money";
+                    Intent intent = new Intent();
+                    intent.setAction(Intent.ACTION_VIEW);
+                    intent.setData(Uri.parse(url));
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(intent);
+                } catch (Exception e) {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://myket.ir/app/com.finova.money")));
+                    } catch (Exception e2) {
+                        toastMain("مایکت روی دستگاه نصب نیست");
+                    }
+                }
+            });
+        }
+
         private void js(String call) {
             main.post(() -> web.evaluateJavascript(call, null));
         }

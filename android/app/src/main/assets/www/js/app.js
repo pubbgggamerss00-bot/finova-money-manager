@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.4.0';
+  const APP_VERSION = '1.5.0';
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -47,6 +47,12 @@ const App = (() => {
     // همیشه با مقادیر پیش‌فرض ادغام کن — فیلدهای جدید نسخه‌ها برای کاربران قدیمی هم ساخته شوند
     state = Object.assign(defaultState(), state, { v: 2 });
     state.rateAsk = Object.assign({ done: false, laterAt: 0, never: false }, state.rateAsk || {});
+    // فیلدهای حساب/اشتراک — برای کاربران قدیمی هم ساخته شوند
+    state.account = state.account || null;
+    state.trialStart = +state.trialStart || 0;
+    state.pro = Object.assign({ expiresAt: 0, used: [] }, state.pro || {});
+    if (!Array.isArray(state.pro.used)) state.pro.used = [];
+    state.quota = Object.assign({ aiFree: 0, smartFree: 0, calcFree: 0, rateDay: '', rateCount: 0, aiDay: '', aiDayCount: 0 }, state.quota || {});
     state.openCount = +(state.openCount || 0) + 1;   // شمارش باز شدن برای دیالوگ امتیاز
     try { saveState(); } catch (e) {}
     try { Splash.step(56, 'بارگذاری تراکنش‌ها…'); } catch (e) {}
@@ -65,6 +71,8 @@ const App = (() => {
     try { const vEl = document.getElementById('spVer'); if (vEl) vEl.textContent = 'نسخه ' + faDigits(APP_VERSION).replace('.', '٫'); } catch (e) {}
     try { Splash.done(); } catch (e) {}
 
+    // ثبت‌نام — هر کاربر حساب شخصی خودش را دارد؛ بدون حساب، صفحه ثبت‌نام نشان داده می‌شود
+    if (!state.account || !state.account.code) { showAuth(); return; }
     // قفل
     if (state.lock && state.lock.enabled) { showLock(); } else { unlocked = true; afterUnlock(); }
   }
@@ -78,6 +86,10 @@ const App = (() => {
       aiBaseURL: '', aiApiKey: '', aiModel: '',   // خالی = سرویس رایگان پیش‌فرض فینوا (بدون کلید)
       manualUSD: '', manualGold: '',
       backup: { auto: true, lastAt: 0 },
+      account: null,                                  // { name, code, salt, passHash, createdAt } — حساب شخصی کاربر
+      trialStart: 0,                                  // شروع دوره تست ۲۴ ساعته پرو
+      pro: { expiresAt: 0, used: [] },                // اشتراک پرو (توکن‌ها تجمعی هستند)
+      quota: { aiFree: 0, smartFree: 0, calcFree: 0, rateDay: '', rateCount: 0, aiDay: '', aiDayCount: 0 },
       openCount: 0,                                   // چند بار برنامه باز شده (شرط دیالوگ امتیاز)
       rateAsk: { done: false, laterAt: 0, never: false }, // دیالوگ امتیاز در مایکت
       seedDone: false, notifShown: {},
@@ -85,8 +97,241 @@ const App = (() => {
   }
   async function saveState() { state.notifShown = state.notifShown || {}; await Store.put('kv', state, 'settings'); }
 
+  /* ═══════════ حساب کاربری، اشتراک پرو، توکن و کوارتا ═══════════ */
+  const LIC_DAY = 864e5;
+  const TOK_ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // ۳۱ نویسه بدون I,L,O,0,1
+  const PRO_FEATURES = [
+    { ico: '🌐', t: 'هوش مصنوعی آنلاین روزی ۱۰ پیام', s: 'نسخه رایگان فقط ۲ پیام — پرو ۱۰ پیام در روز برای دستیار و تحلیل سرمایه‌گذاری' },
+    { ico: '📈', t: 'تحلیل سرمایه‌گذاری کامل', s: 'بروزرسانی نامحدود قیمت‌های واقعی + بروزرسانی خودکار هر ۶۰ ثانیه' },
+    { ico: '📊', t: 'نمودار رشد دارایی‌ها در همه بازه‌ها', s: 'بازه‌های زنده، ۳ ماهه و ۶ ماهه — رایگان فقط ۱ ماهه' },
+    { ico: '🧮', t: 'حساب‌گر سود بدون محدودیت', s: 'نسخه رایگان فقط ۲ بار محاسبه دارد' },
+    { ico: '🧾', t: 'گزارش PDF ماه جاری + کارت اشتراکی', s: 'خروجی PDF حرفه‌ای و کارت قابل اشتراک‌گذاری' },
+    { ico: '🔐', t: 'پشتیبان رمزنگاری‌شده نامحدود', s: 'پشتیبان AES-256 با رمز دلخواه — بدون سقف' },
+  ];
+  const PRO_REASONS = {
+    ai: 'پیام‌های رایگان هوش مصنوعی آنلاین تمام شد (۲ پیام).',
+    smart: 'تحلیل هوشمند رایگان (۱ بار) استفاده شده است.',
+    calc: 'حساب‌گر سود رایگان (۲ بار) تمام شد.',
+    rate: 'بروزرسانی قیمت امروز استفاده شد — نسخه رایگان روزی ۱ بار.',
+    chart: 'این بازه از نمودار مخصوص نسخه پرو است.',
+    pdf: 'خروجی PDF مخصوص نسخه پرو است.',
+    card: 'کارت اشتراکی مخصوص نسخه پرو است.',
+    backup: 'پشتیبان رمزنگاری‌شده مخصوص نسخه پرو است (نامحدود).',
+    trial: 'برای ادامه استفاده کامل، نسخه پرو را فعال کن.',
+    home: 'با ارتقا، ۶ قابلیت حرفه‌ای فعال می‌شود.',
+  };
+  function newAccCode() {
+    const buf = new Uint8Array(6); crypto.getRandomValues(buf);
+    return 'FN-' + Array.from(buf, b => TOK_ALPHA[b % TOK_ALPHA.length]).join('');
+  }
+  function isPro() {
+    if (state.pro && state.pro.expiresAt > Date.now()) return true;
+    return !!(state.trialStart && Date.now() < state.trialStart + LIC_DAY);
+  }
+  function proExpiresAt() { return state.pro && state.pro.expiresAt > Date.now() ? state.pro.expiresAt : 0; }
+  function trialLeftMs() { return state.trialStart ? Math.max(0, state.trialStart + LIC_DAY - Date.now()) : 0; }
+  function trialActive() { return trialLeftMs() > 0; }
+  function todayKey() { return jKey(jToday()); }
+  function jTsLabel(ts) { try { return jDateLabel(jKey(Jalali.toJalali(new Date(ts)))); } catch (e) { return '—'; } }
+  /* — کوارتای هوش مصنوعی: رایگان ۲ پیام کل | پرو ۱۰ پیام در روز — */
+  function aiQuotaReset() {
+    const q = state.quota, tk = todayKey();
+    if (q.aiDay !== tk) { q.aiDay = tk; q.aiDayCount = 0; }
+  }
+  function aiLeft() {
+    aiQuotaReset();
+    if (isPro()) return Math.max(0, 10 - (state.quota.aiDayCount || 0));
+    return Math.max(0, 2 - (state.quota.aiFree || 0));
+  }
+  function consumeAI() {
+    aiQuotaReset();
+    if (isPro()) state.quota.aiDayCount = (state.quota.aiDayCount || 0) + 1;
+    else state.quota.aiFree = (state.quota.aiFree || 0) + 1;
+    saveState();
+  }
+  /* — تحلیل هوشمند سرمایه‌گذاری: رایگان ۱ بار | پرو از سهمیه ۱۰تایی روز — */
+  function smartLeft() { return isPro() ? aiLeft() : Math.max(0, 1 - (state.quota.smartFree || 0)); }
+  function consumeSmart() {
+    if (isPro()) { consumeAI(); return; }
+    state.quota.smartFree = (state.quota.smartFree || 0) + 1; saveState();
+  }
+  /* — حساب‌گر سود: رایگان ۲ بار | پرو نامحدود — */
+  function calcLeft() { return isPro() ? Infinity : Math.max(0, 2 - (state.quota.calcFree || 0)); }
+  function consumeCalc() { if (!isPro()) { state.quota.calcFree = (state.quota.calcFree || 0) + 1; saveState(); } }
+  /* — بروزرسانی دستی قیمت: رایگان روزی ۱ بار | پرو نامحدود — */
+  function rateLeftToday() {
+    if (isPro()) return Infinity;
+    return (state.quota.rateDay === todayKey()) ? Math.max(0, 1 - (state.quota.rateCount || 0)) : 1;
+  }
+  function consumeRate() {
+    if (isPro()) return;
+    const tk = todayKey();
+    if (state.quota.rateDay !== tk) { state.quota.rateDay = tk; state.quota.rateCount = 0; }
+    state.quota.rateCount = (state.quota.rateCount || 0) + 1; saveState();
+  }
+  /* — توکن فعال‌سازی PXXXX-XXXX-XXXX-XXXX با رقم کنترل — */
+  function normalizeToken(raw) {
+    return String(raw || '').toUpperCase().split('').filter(c => TOK_ALPHA.includes(c)).join('');
+  }
+  function tokenCheck(body15) {
+    let s = 0;
+    for (let i = 0; i < body15.length; i++) s += (TOK_ALPHA.indexOf(body15[i]) + 1) * (i + 1);
+    return TOK_ALPHA[s % TOK_ALPHA.length];
+  }
+  function validToken(raw) {
+    const s = normalizeToken(raw);
+    if (s.length !== 16 || s[0] !== 'P') return false;
+    return tokenCheck(s.slice(0, 15)) === s[15];
+  }
+  async function activateToken(raw) {
+    const tok = normalizeToken(raw);
+    if (!validToken(tok)) return { ok: false, msg: 'توکن نامعتبر است — ۱۶ نویسه به شکل PXXXX-XXXX-XXXX-XXXX' };
+    if ((state.pro.used || []).includes(tok)) return { ok: false, msg: 'این توکن قبلاً روی این حساب استفاده شده است' };
+    const base = Math.max(Date.now(), state.pro.expiresAt || 0);
+    state.pro.expiresAt = base + 30 * LIC_DAY;
+    state.pro.used = (state.pro.used || []).concat([tok]);
+    state.pro.lastActivated = Date.now();
+    await saveState();
+    removeTrialTimer();
+    return { ok: true };
+  }
+  function copyText(s) {
+    try { navigator.clipboard.writeText(s); } catch (e) {
+      const ta = document.createElement('textarea'); ta.value = s; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch (e2) {} ta.remove();
+    }
+    UI.toast('کپی شد ✅', 'ok');
+  }
+  /* — صفحه ثبت‌نام اولین ورود — */
+  function showAuth() {
+    const sc = document.getElementById('authScreen');
+    if (!sc) { unlocked = true; afterUnlock(); return; }
+    sc.classList.remove('hidden');
+    const err = document.getElementById('authErr');
+    const submit = async () => {
+      const name = document.getElementById('authName').value.trim();
+      const p1 = document.getElementById('authPass').value;
+      const p2 = document.getElementById('authPass2').value;
+      if (name.length < 2) { err.textContent = 'نام باید حداقل ۲ حرف باشد'; return; }
+      if (p1.length < 4) { err.textContent = 'رمز باید حداقل ۴ کاراکتر باشد'; return; }
+      if (p1 !== p2) { err.textContent = 'تکرار رمز مطابقت ندارد'; return; }
+      err.textContent = '';
+      const salt = String(Math.random()).slice(2, 10);
+      state.account = { name, code: newAccCode(), salt, passHash: simpleHash(p1 + salt), createdAt: Date.now() };
+      state.trialStart = Date.now();                // 🎁 ۲۴ ساعت تست کامل پرو
+      await saveState();
+      sc.classList.add('hidden');
+      unlocked = true;
+      const m = UI.modal('🎉 خوش آمدی ' + esc(name) + '!', `
+        <div style="text-align:center">
+          <p style="font-size:12.5px;line-height:2;color:var(--txt2);margin:0 0 10px">حساب شخصی‌ات ساخته شد و <b style="color:var(--ok2)">۲۴ ساعت دسترسی کامل پرو</b> فعال است 🎁</p>
+          <div class="acc-code-row"><div><div class="acc-code-lbl">کد حساب تو — هنگام خرید توکن لازم می‌شود</div><div class="acc-code-val">${esc(state.account.code)}</div></div><button class="copy-code-btn" id="copyAccBtn1">📋 کپی</button></div>
+          <p class="tok-hint" style="text-align:center">این کد در <b>تنظیمات ← حساب کاربری</b> همیشه در دسترس است</p>
+        </div>
+        <div class="btn-row" style="margin-top:12px"><button class="btn full" id="accOkBtn">شروع می‌کنم 🚀</button></div>`);
+      m.querySelector('#copyAccBtn1').onclick = () => copyText(state.account.code);
+      m.querySelector('#accOkBtn').onclick = () => { m.remove(); };
+      if (state.lock && state.lock.enabled) showLock(); else afterUnlock();
+    };
+    document.getElementById('authGoBtn').onclick = submit;
+    ['authName', 'authPass', 'authPass2'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.onkeydown = e => { if (e.key === 'Enter') submit(); };
+    });
+    setTimeout(() => { try { document.getElementById('authName').focus(); } catch (e) {} }, 300);
+  }
+  /* — تایمر نئونی قرمز دوره تست ۲۴ ساعته — */
+  let trialInt = null;
+  function removeTrialTimer() {
+    if (trialInt) { clearInterval(trialInt); trialInt = null; }
+    document.body.classList.remove('trial-on');
+    const el = document.getElementById('trialTimer');
+    if (el) el.remove();
+  }
+  function startTrialTimer() {
+    if (!trialActive() || proExpiresAt()) { removeTrialTimer(); return; }  // پرو خریداری شده → تایمر معنا ندارد
+    document.body.classList.add('trial-on');
+    let el = document.getElementById('trialTimer');
+    if (!el) {
+      el = document.createElement('button');
+      el.id = 'trialTimer'; el.className = 'trial-timer'; el.type = 'button';
+      el.setAttribute('aria-label', 'زمان باقی‌مانده دوره تست پرو — برای ارتقا لمس کنید');
+      el.onclick = () => showProModal('trial');
+      document.body.appendChild(el);
+    }
+    const pad = n => String(n).padStart(2, '0');
+    const tick = () => {
+      const left = trialLeftMs();
+      if (left <= 0) { removeTrialTimer(); return; }
+      const h = Math.floor(left / 3600000), mi = Math.floor((left % 3600000) / 60000), s = Math.floor((left % 60000) / 1000);
+      el.innerHTML = '⏳ ' + faDigits(pad(h) + ':' + pad(mi) + ':' + pad(s)) + ' <small>پایان تست پرو</small>';
+    };
+    tick();
+    if (trialInt) clearInterval(trialInt);
+    trialInt = setInterval(tick, 1000);
+  }
+  /* — صفحه طلایی پرو + دو روش خرید — */
+  function showProModal(reason) {
+    const why = PRO_REASONS[reason] ? `<p style="font-size:11.5px;color:var(--warn2);text-align:center;margin:0 0 4px;font-weight:700">⚠ ${esc(PRO_REASONS[reason])}</p>` : '';
+    const trialNote = trialActive() ? `<div class="pro-trial-note">🎁 دوره تست پرو فعال — ${faDigits(Math.max(1, Math.ceil(trialLeftMs() / 3600000)))} ساعت باقی‌مانده</div>` : '';
+    const m = UI.modal('⭐ فینوا پرو', `
+      <div class="pro-modal">
+        <div class="pro-head">
+          <div class="pro-badge">⭐ نسخه پرو</div>
+          <div class="pro-title">با ارتقا، ${faDigits(PRO_FEATURES.length)} قابلیت فعال می‌شود</div>
+          ${trialNote}
+        </div>
+        ${why}
+        <div class="pro-feats">${PRO_FEATURES.map(f => `<div class="pro-feat"><div class="pf-ico">${f.ico}</div><div><div class="pf-t">${f.t}</div><div class="pf-s">${f.s}</div></div></div>`).join('')}</div>
+        <div class="pro-sep">روش خرید</div>
+        <div class="pro-methods">
+          <button class="btn-gold" id="buyMyketBtn">🛒 خرید درون‌برنامه‌ای مایکت</button>
+          <button class="btn-token" id="buyTokenBtn">🔑 فعال‌سازی با توکن</button>
+        </div>
+        <p class="pro-method-hint">پس از خرید در مایکت، توکن فعال‌سازی را دریافت و در «فعال‌سازی با توکن» وارد می‌کنی • هر توکن ۳۰ روز اعتبار پرو اضافه می‌کند و روی هم جمع می‌شود</p>
+      </div>`);
+    m.querySelector('#buyMyketBtn').onclick = () => {
+      try { if (Bridge.openMyketApp) { Bridge.openMyketApp(); return; } } catch (e) {}
+      try { window.open('https://myket.ir/app/com.finova.money', '_blank', 'noopener'); } catch (e) {}
+    };
+    m.querySelector('#buyTokenBtn').onclick = () => tokenModal();
+  }
+  function tokenModal() {
+    const m = UI.modal('🔑 فعال‌سازی با توکن', `
+      <p style="font-size:12px;color:var(--txt2);line-height:1.9;margin:0 0 10px">هنگام خرید توکن، <b>کد حساب</b> زیر را ارائه کن تا توکن به حساب تو وصل شود:</p>
+      <div class="acc-code-row"><div><div class="acc-code-lbl">کد حساب تو</div><div class="acc-code-val">${esc(state.account ? state.account.code : '—')}</div></div><button class="copy-code-btn" id="copyAccBtn2">📋 کپی</button></div>
+      <div style="height:12px"></div>
+      <input id="tokInp" class="tok-input" placeholder="PXXXX-XXXX-XXXX-XXXX" maxlength="19" autocomplete="off">
+      <p class="tok-hint">هر توکن ۳۰ روز اشتراک پرو اضافه می‌کند و توکن‌های بعدی روی هم جمع می‌شوند • توکن یک‌بارمصرف است</p>
+      <p id="tokErr" style="font-size:11.5px;color:var(--bad2);font-weight:700;min-height:16px;margin:4px 0 0"></p>
+      <div class="btn-row"><button class="btn full" id="tokGoBtn">فعال‌سازی پرو ✨</button><button class="btn ghost" id="tokXBtn">بستن</button></div>`);
+    const inp = m.querySelector('#tokInp');
+    inp.oninput = () => { inp.value = inp.value.toUpperCase(); };
+    m.querySelector('#copyAccBtn2').onclick = () => copyText(state.account ? state.account.code : '');
+    m.querySelector('#tokXBtn').onclick = () => m.remove();
+    m.querySelector('#tokGoBtn').onclick = async () => {
+      const v = inp.value.trim();
+      if (!v) { m.querySelector('#tokErr').textContent = 'توکن را وارد کن'; return; }
+      const r = await activateToken(v);
+      if (!r.ok) { m.querySelector('#tokErr').textContent = r.msg; return; }
+      m.remove();
+      Bridge.vibrate(80);
+      UI.toast('🎉 اشتراک پرو فعال شد تا ' + jTsLabel(state.pro.expiresAt), 'ok');
+      Bridge.showNotification('⭐ فینوا پرو فعال شد', 'اشتراک پرو تا ' + jTsLabel(state.pro.expiresAt) + ' فعال است. همه قابلیت‌ها آزاد شدند!', 9901, 'proOn');
+      render(curTab);
+    };
+    setTimeout(() => { try { inp.focus(); } catch (e) {} }, 150);
+  }
+  function subStatusHTML() {
+    const pe = proExpiresAt();
+    if (pe) return `<div><span class="sub-status pro">⭐ پرو فعال تا ${jTsLabel(pe)}</span></div>`;
+    if (trialActive()) return `<div><span class="sub-status trial">🎁 دوره تست پرو — ${faDigits(Math.max(1, Math.ceil(trialLeftMs() / 3600000)))} ساعت باقی‌مانده</span></div>`;
+    return `<div><span class="sub-status free">نسخه رایگان</span></div>`;
+  }
+
   function afterUnlock() {
     generateRecurring();
+    startTrialTimer();
     render(curTab);
     scheduleNotifications();
     Bridge.updateWidget(
@@ -106,6 +351,7 @@ const App = (() => {
   /* ───────── قیمت‌های زنده: بروزرسانی خودکار + پچ نرم DOM ───────── */
   let fetchingRates = false;
   async function autoRefreshRates() {
+    if (!isPro()) return;   // بروزرسانی خودکار هر ۶۰ ثانیه مخصوص نسخه پرو — رایگان فقط بروزرسانی اولیه و روزی ۱ بار دستی
     if (fetchingRates || document.visibilityState !== 'visible') return;
     if (lastRates && lastRates.ts && Date.now() - lastRates.ts < 50000) return;
     fetchingRates = true;
@@ -524,7 +770,14 @@ const App = (() => {
       <div class="card-title">📊 روند ۶ ماه <span class="lnk" data-go-tab="analytics">گزارش کامل ›</span></div>
       <div class="chart-box" id="dashTrend"></div>
       <div class="legend"><span><i style="background:var(--ok2)"></i>درآمد</span><span><i style="background:var(--acc)"></i>هزینه و قسط</span></div>
-    </div>`;
+    </div>
+
+    ${!proExpiresAt() ? `
+    <button class="pro-cta" id="proCta" aria-label="ارتقا به نسخه پرو">
+      <span class="pro-cta-ico">⭐</span>
+      <span class="pro-cta-txt">ارتقا به نسخه پرو</span>
+      <span class="pro-cta-sub">${faDigits(PRO_FEATURES.length)} قابلیت فعال می‌شود</span>
+    </button>` : `<div class="pro-active-strip">⭐ اشتراک پرو فعال است${proExpiresAt() ? ' تا ' + jTsLabel(proExpiresAt()) : ''} — همه قابلیت‌ها آزادند ✨</div>`}`;
   }
 
   /* ── تراکنش‌ها ── */
@@ -645,8 +898,8 @@ const App = (() => {
     <div class="card">
       <div class="card-title">📤 خروجی گزارش</div>
       <div class="btn-row">
-        <button class="btn" id="pdfBtn">🧾 PDF ماه جاری</button>
-        <button class="btn ghost" id="shareBtn">🖼️ کارت اشتراکی</button>
+        <button class="btn" id="pdfBtn">🧾 PDF ماه جاری${isPro() ? '' : ' ⭐'}</button>
+        <button class="btn ghost" id="shareBtn">🖼️ کارت اشتراکی${isPro() ? '' : ' ⭐'}</button>
       </div>
       <div class="btn-row">
         <button class="btn ghost" id="csvBtn">📑 خروجی Excel/CSV</button>
@@ -719,6 +972,9 @@ const App = (() => {
     ${aiTab === 'online' ? `
       <div class="card">
         <div class="card-title">هوش مصنوعی آنلاین <span class="ai-badge on">✓ ${esc(cfg.label || 'سرویس رایگان فینوا')} — فعال</span></div>
+        <div style="margin:0 0 10px">${isPro()
+          ? `<span class="quota-badge" id="aiQuotaBadge">⭐ امروز: ${faDigits(aiLeft())} از ۱۰ پیام</span>`
+          : `<span class="quota-badge ${aiLeft() ? '' : 'warn'}" id="aiQuotaBadge">رایگان: ${faDigits(aiLeft())} از ۲ پیام${aiLeft() ? '' : ' — تمام شد'}</span>`}</div>
         <p style="font-size:12px;color:var(--txt2);line-height:1.9;margin:0 0 12px">تمام داده‌های مالی تو (اقساط، بودجه، اهداف، موجودی و قیمت لحظه‌ای) برای تحلیل به مدل هوش مصنوعی ارسال می‌شود و تحلیل کامل و شخصی‌سازی‌شده می‌گیری. ${cfg.isDefault ? 'سرویس پیش‌فرض <b>رایگان</b> است و به هیچ کلید API نیاز ندارد' : 'از سرویس شخصی خودت استفاده می‌شود'}؛ برای تغییر به <b data-go-tab="settings">تنظیمات</b> برو.</p>
         <div class="chips" style="margin-bottom:12px">
           ${['کدام قسط مهم‌تر است و چرا؟', 'چقدر می‌توانم پس‌انداز کنم و چطور؟', 'با موجودی من چه چیزی بخرم؟', 'برنامه مالی یک‌ماهه برایم بساز'].map(q => `<button class="chip" data-qo="${esc(q)}">${q}</button>`).join('')}
@@ -736,14 +992,15 @@ const App = (() => {
         <div class="rate-card" style="margin-bottom:0"><div class="rate-ico usd">🌐</div><div class="rate-main"><div class="t">انس جهانی طلا</div><div class="s">XAU/USD</div></div><div class="rate-val"><div class="v" id="rv_ounce">${r && r.ounce ? '$' + fmtNum(Math.round(r.ounce)) : '—'}</div><div id="rd_ounce">${rateDeltaHTML('ounce')}</div></div></div>
         <div class="rate-stamp" id="rateStamp">${r && r.ts ? '🗓 آخرین بروزرسانی: <b>' + relTime(r.ts) + '</b>' + (r.source ? ' • منبع: ' + esc(r.source) : '') : 'هنوز قیمتی دریافت نشده'}</div>
         <button class="btn ghost full" id="refreshRates" style="margin-top:10px">🔄 بروزرسانی قیمت‌ها</button>
-        <div class="hint" style="text-align:center;margin-top:7px">قیمت‌ها هر ۶۰ ثانیه خودکار بروز می‌شوند • منبع: TGJU</div>
+        <div class="hint" style="text-align:center;margin-top:7px">${isPro() ? 'قیمت‌ها هر ۶۰ ثانیه خودکار بروز می‌شوند • منبع: TGJU' : 'نسخه رایگان: روزی یک بروزرسانی دستی • بروزرسانی خودکار و نامحدود مخصوص پرو است ⭐'}</div>
       </div>
       <div class="card">
         <div class="card-title">📊 مقایسه روند رشد دارایی‌ها</div>
         <div class="chips" style="margin-bottom:10px">
-          <button class="chip ${investRange === 'live' ? 'on' : ''}" data-ir="live">زنده</button>
+          <button class="chip ${investRange === 'live' ? 'on' : ''}" data-ir="live">زنده${isPro() ? '' : '<span class="lock-ico">🔒</span>'}</button>
           <button class="chip ${investRange === '1m' ? 'on' : ''}" data-ir="1m">۱ ماه</button>
-          <button class="chip ${investRange === '3m' ? 'on' : ''}" data-ir="3m">۳ ماه</button>
+          <button class="chip ${investRange === '3m' ? 'on' : ''}" data-ir="3m">۳ ماه${isPro() ? '' : '<span class="lock-ico">🔒</span>'}</button>
+          <button class="chip ${investRange === '6m' ? 'on' : ''}" data-ir="6m">۶ ماه${isPro() ? '' : '<span class="lock-ico">🔒</span>'}</button>
         </div>
         <div class="chart-box" id="rateChart"></div>
         <div class="legend" id="rateLegend"></div>
@@ -788,11 +1045,13 @@ const App = (() => {
       document.getElementById('aiOnBtn').onclick = askOnline;
       document.getElementById('aiOnInp').onkeydown = e => { if (e.key === 'Enter') askOnline(); };
       async function askOnline() {
+        if (aiLeft() <= 0) { showProModal('ai'); return; }
         const q = document.getElementById('aiOnInp').value.trim() || 'وضعیت مالی من را کامل تحلیل کن و پیشنهاد بده';
         out.innerHTML = `<div class="ai-bubble user">${esc(q)}</div><div class="ai-think" id="thinkRow">🧠 آماده‌سازی داده‌ها <span class="dots-anim"><span>•</span><span>•</span><span>•</span></span></div>`;
         out.scrollIntoView({ behavior: 'smooth', block: 'end' });
         try {
           const ans = await AI.onlineAnswer(q, s => { const t = document.getElementById('thinkRow'); if (t) t.innerHTML = '⏳ ' + s + ' <span class="dots-anim"><span>•</span><span>•</span><span>•</span></span>'; });
+          consumeAI(); updateAIBadge();
           out.innerHTML = out.innerHTML.replace(/<div class="ai-think".*?<\/div>/s, '') + `<div class="ai-bubble">${mdLite(ans)}</div><div class="btn-row"><button class="btn ghost sm" id="copyAns">📋 کپی پاسخ</button></div>`;
           document.getElementById('copyAns').onclick = () => { navigator.clipboard && navigator.clipboard.writeText(ans); UI.toast('کپی شد', 'ok'); };
         } catch (e) {
@@ -806,11 +1065,13 @@ const App = (() => {
       quickInvest();
       renderInsights();
       document.getElementById('refreshRates').onclick = async (e) => {
+        if (rateLeftToday() <= 0) { showProModal('rate'); return; }   // رایگان: روزی ۱ بار | پرو نامحدود
         const btn = e.target;
         btn.disabled = true; btn.textContent = '⏳ در حال دریافت قیمت‌های واقعی…';
         try {
           const r = await AI.fetchRates();
           if (r && (r.usd || r.gold18 || r.goldCoin)) {
+            consumeRate();
             lastRates = r; App.lastRates = r;
             btn.textContent = '🔄 بروزرسانی قیمت‌ها';
             patchRateDOM(r); quickInvest(); renderInsights(); drawInvestChart();
@@ -822,14 +1083,24 @@ const App = (() => {
         } catch (err) { btn.textContent = '🔄 بروزرسانی قیمت‌ها'; UI.toast('خطا در دریافت قیمت', 'bad'); }
         btn.disabled = false;
       };
-      document.querySelectorAll('[data-ir]').forEach(b => b.onclick = () => { investRange = b.dataset.ir; render('ai'); });
-      document.getElementById('wfBtn').onclick = whatIfCalc;
+      document.querySelectorAll('[data-ir]').forEach(b => b.onclick = () => {
+        const rg = b.dataset.ir;
+        if (rg !== '1m' && !isPro()) { showProModal('chart'); return; }   // رایگان فقط بازه ۱ ماهه
+        investRange = rg; render('ai');
+      });
+      document.getElementById('wfBtn').onclick = async () => {
+        if (calcLeft() <= 0) { showProModal('calc'); return; }   // رایگان: ۲ بار | پرو نامحدود
+        const ok = await whatIfCalc();
+        if (ok) consumeCalc();
+      };
       document.getElementById('investAIBtn').onclick = async () => {
+        if (smartLeft() <= 0) { showProModal('smart'); return; }   // رایگان: ۱ بار | پرو از سهمیه ۱۰تایی روز
         const out = document.getElementById('aiInvestOut');
         out.innerHTML = `<div class="ai-think">🧠 تحلیل طلا و دلار <span class="dots-anim"><span>•</span><span>•</span><span>•</span></span></div>`;
         out.scrollIntoView({ behavior: 'smooth', block: 'end' });
         try {
           const ans = await AI.onlineAnswer('با توجه به قیمت لحظه‌ای طلا و دلار و روند ۳۰ روزه و موجودی و پس‌انداز من، کدام برای نگهداری ارزش پول من بهتر است؟ طلا بخرم یا دلار؟ تحلیل کامل سود/ریسک با اعداد بده و مقدار پیشنهادی را هم بگو.');
+          consumeSmart();
           out.innerHTML = `<div class="ai-bubble">${mdLite(ans)}</div>`;
         } catch (e) { out.innerHTML = `<div class="ai-bubble" style="border-color:var(--bad)">❌ ${esc(e.message)}</div>`; }
         out.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -837,15 +1108,23 @@ const App = (() => {
     }
   }
   /* ───────── نمودار مقایسه رشد دارایی‌ها (٪ نسبت به ابتدای بازه) ───────── */
-  let investRange = 'live';
+  let investRange = '';   // خالی = هنوز انتخاب نشده — رایگان فقط ۱ ماهه، پرو زنده/۱/۳/۶ ماهه
+  function updateAIBadge() {
+    const el = document.getElementById('aiQuotaBadge');
+    if (!el) return;
+    el.outerHTML = isPro()
+      ? `<span class="quota-badge" id="aiQuotaBadge">⭐ امروز: ${faDigits(aiLeft())} از ۱۰ پیام</span>`
+      : `<span class="quota-badge ${aiLeft() ? '' : 'warn'}" id="aiQuotaBadge">رایگان: ${faDigits(aiLeft())} از ۲ پیام${aiLeft() ? '' : ' — تمام شد'}</span>`;
+  }
   async function drawInvestChart() {
     const el = document.getElementById('rateChart');
     if (!el) return;
+    if (!investRange) investRange = isPro() ? 'live' : '1m';
     let hist;
     if (investRange === 'live') hist = await AI.snapHistory();
     else {
       const daily = await AI.rateHistory();
-      hist = (investRange === '1m' ? daily.slice(-30) : daily.slice(-90)).map(d => ({ ts: d.ts, day: d.day, usd: d.usd, gold18: d.gold18, goldCoin: d.goldCoin }));
+      hist = (investRange === '1m' ? daily.slice(-30) : investRange === '6m' ? daily.slice(-180) : daily.slice(-90)).map(d => ({ ts: d.ts, day: d.day, usd: d.usd, gold18: d.gold18, goldCoin: d.goldCoin }));
     }
     if (!hist || hist.length < 2) {
       el.innerHTML = `<div class="empty"><div class="big">📈</div>${investRange === 'live' ? 'داده زنده در حال جمع شدن است — چند دقیقه صبر کن یا «بروزرسانی قیمت‌ها» را بزن' : 'با هر بار باز کردن اپ، قیمت‌ها ذخیره می‌شوند و روند اینجا ساخته می‌شود'}</div>`;
@@ -916,19 +1195,19 @@ const App = (() => {
     const lg = document.getElementById('rateLegend');
     if (lg) lg.innerHTML = legendParts.join('');
   }
-  /* ───────── حساب‌گر «اگر قبلاً می‌خریدی؟» ───────── */
+  /* ───────── حساب‌گر «اگر قبلاً می‌خریدی؟» — خروجی true = محاسبه انجام شد (برای کوارتا) ───────── */
   async function whatIfCalc() {
     const el = document.getElementById('wfOut');
-    if (!el) return;
+    if (!el) return false;
     const amt = Math.max(0, +(document.getElementById('wfAmt').value || 0));
     const days = +(document.getElementById('wfDays').value || 30);
     const asset = document.getElementById('wfAsset').value;
     const names = { gold18: 'طلا ۱۸ عیار (گرم)', goldCoin: 'سکه امامی (عدد)', usd: 'دلار ( عدد)' };
     const units = { gold18: 'گرم', goldCoin: 'سکه', usd: 'دلار' };
-    if (!amt) { el.innerHTML = '<div class="hint">مبلغ را وارد کن</div>'; return; }
+    if (!amt) { el.innerHTML = '<div class="hint">مبلغ را وارد کن</div>'; return false; }
     const r = lastRates;
     const nowP = r && { gold18: r.gold18, goldCoin: r.goldCoin, usd: r.usd }[asset];
-    if (!nowP) { el.innerHTML = '<div class="hint">قیمت فعلی در دسترس نیست — دکمه بروزرسانی را بزن</div>'; return; }
+    if (!nowP) { el.innerHTML = '<div class="hint">قیمت فعلی در دسترس نیست — دکمه بروزرسانی را بزن</div>'; return false; }
     // قیمت گذشته از تاریخچه روزانه — نزدیک‌ترین رکورد به فاصله درخواستی
     const hist = await AI.rateHistory();
     let pastP = 0, pastLabel = '';
@@ -939,7 +1218,7 @@ const App = (() => {
     }
     if (!pastP) {
       el.innerHTML = `<div class="hint">برای محاسبه دقیق، تاریخچه ${faDigits(days)} روز لازم است — تاریخچه با هر بروزرسانی قیمت کامل‌تر می‌شود. 📈</div>`;
-      return;
+      return false;
     }
     const qty = amt / pastP;
     const nowVal = qty * nowP;
@@ -955,6 +1234,7 @@ const App = (() => {
         <div class="v" style="color:${good ? 'var(--ok2)' : 'var(--bad2)'}">${good ? '+' : '−'}${fmtShort(Math.abs(profit))} <small>تومان</small></div>
         <div class="sub">${faN(pct.toFixed(1))}٪ ${good ? 'سود ✅' : 'زیان'} در ${faDigits(days)} روز • معادل ${faN(qty >= 100 ? Math.round(qty) : qty.toFixed(2))} ${units[asset]}</div></div>
       <p class="hint" style="margin:0">${good ? 'این دارایی در این بازه از تورم عقب نمانده.' : 'این دارایی در این بازه عملکرد ضعیف‌تری داشته — مقایسه با دارایی‌های دیگر را در نمودار ببین.'}</p>`;
+    return true;
   }
   /* ───────── بینش‌های خودکار تحلیل سرمایه‌گذاری ───────── */
   async function renderInsights() {
@@ -1195,7 +1475,25 @@ const App = (() => {
   /* ── تنظیمات ── */
   function settingsHTML() {
     const cfg = AI.aiConfig();
+    const acc = state.account;
     return `
+    ${acc ? `
+    <div class="card">
+      <div class="card-title">👤 حساب کاربری</div>
+      <div style="display:flex;align-items:center;gap:11px">
+        <div style="width:44px;height:44px;border-radius:50%;background:var(--grad-neon);display:grid;place-items:center;font-size:18px;font-weight:900;color:#fff;flex:0 0 auto">${esc((acc.name || '؟').slice(0, 1))}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:900">${esc(acc.name)}</div>
+          <div style="font-size:10.5px;color:var(--txt3);margin-top:2px">ساخت حساب: ${jTsLabel(acc.createdAt || Date.now())}</div>
+        </div>
+        ${subStatusHTML()}
+      </div>
+      <div class="acc-code-row">
+        <div><div class="acc-code-lbl">کد حساب — هنگام خرید توکن پرو ارائه کن</div><div class="acc-code-val">${esc(acc.code)}</div></div>
+        <button class="copy-code-btn" id="copyAccBtn">📋 کپی</button>
+      </div>
+      ${!isPro() ? '<button class="btn-gold" id="proUpBtn" style="margin-top:12px">⭐ ارتقا به نسخه پرو</button>' : ''}
+    </div>` : ''}
     <div class="card">
       <div class="card-title">🔐 قفل و امنیت</div>
       <div class="switch-row"><span>قفل با رمز (PIN ۴ رقمی)</span><label class="switch"><input type="checkbox" id="swLock" ${state.lock && state.lock.enabled ? 'checked' : ''}><span class="sw"></span></label></div>
@@ -1234,7 +1532,7 @@ const App = (() => {
     <div class="card">
       <div class="card-title">💾 داده و پشتیبان</div>
       <div class="switch-row"><span>پشتیبان‌گیری خودکار روزانه</span><label class="switch"><input type="checkbox" id="swAutoBk" ${state.backup && state.backup.auto ? 'checked' : ''}><span class="sw"></span></label></div>
-      <div class="btn-row"><button class="btn" id="bkEncBtn">🔐 پشتیبان رمزنگاری‌شده</button><button class="btn ghost" id="bkPlainBtn">📤 پشتیبان ساده</button></div>
+      <div class="btn-row"><button class="btn" id="bkEncBtn">🔐 پشتیبان رمزنگاری‌شده${isPro() ? '' : ' ⭐'}</button><button class="btn ghost" id="bkPlainBtn">📤 پشتیبان ساده</button></div>
       <div class="btn-row"><button class="btn ghost" id="restoreBtn">📥 بازیابی از فایل</button><button class="btn ghost" id="exportDataBtn">📋 نمایش داده JSON</button></div>
       <div class="btn-row"><button class="btn danger" id="wipeBtn">🗑 پاک‌سازی کامل داده‌ها</button></div>
       <p class="hint" style="text-align:center;margin-top:8px">پاک‌سازی، همه دیتابیس (IndexedDB و حافظه‌های قبلی) را واقعاً حذف می‌کند.</p>
@@ -1324,16 +1622,19 @@ const App = (() => {
     }
     if (t.closest('#saveRatesBtn')) { state.manualUSD = document.getElementById('mUSD').value; state.manualGold = document.getElementById('mGold').value; saveState(); return UI.toast('ذخیره شد', 'ok'); }
     if (t.closest('#rateMyketBtn')) return showRatingDialog('settings');
-    if (t.closest('#bkEncBtn')) return backupFile(true);
+    // پرو و حساب
+    if (t.closest('#proCta') || t.closest('#proUpBtn')) return showProModal('home');
+    if (t.closest('#copyAccBtn')) return copyText(state.account ? state.account.code : '');
+    if (t.closest('#bkEncBtn')) { if (!isPro()) return showProModal('backup'); return backupFile(true); }   // پشتیبان رمزنگاری‌شده: پرو (نامحدود)
     if (t.closest('#bkPlainBtn')) return backupFile(false);
     if (t.closest('#restoreBtn')) return pickFileAndRestore();
     if (t.closest('#exportDataBtn')) return UI.modal('داده JSON', `<textarea style="width:100%;height:220px;background:var(--bg2);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:10px" readonly>${esc(exportPayload())}</textarea>`);
     if (t.closest('#wipeBtn')) return wipeConfirm();
     if (t.closest('#addCatBtn')) return catForm();
     if (t.closest('#addWalletBtn')) return walletForm();
-    // گزارش‌ها
-    if (t.closest('#pdfBtn')) return exportPDF();
-    if (t.closest('#shareBtn')) return shareCard();
+    // گزارش‌ها — PDF و کارت اشتراکی: مخصوص پرو | CSV و اشتراک متنی: رایگان
+    if (t.closest('#pdfBtn')) { if (!isPro()) return showProModal('pdf'); return exportPDF(); }
+    if (t.closest('#shareBtn')) { if (!isPro()) return showProModal('card'); return shareCard(); }
     if (t.closest('#csvBtn')) return exportCSV();
     if (t.closest('#shareTextBtn')) return shareTextReport();
   }
@@ -1381,13 +1682,17 @@ const App = (() => {
     });
   }
   function wipeConfirm() {
-    UI.confirm('پاک‌سازی کامل!', 'همه داده‌ها برای همیشه حذف می‌شوند و قابل بازگشت نیستند. مطمئنی؟', async () => {
+    UI.confirm('پاک‌سازی کامل!', 'همه داده‌ها برای همیشه حذف می‌شوند و قابل بازگشت نیستند. حساب کاربری، اشتراک پرو و توکن‌های فعال‌شده حفظ می‌شوند. مطمئنی؟', async () => {
+      // حساب و اشتراک حفظ می‌شود تا توکن‌های خریداری‌شده از بین نرود
+      const keep = { account: state.account, trialStart: state.trialStart, pro: state.pro, quota: state.quota, openCount: state.openCount, rateAsk: state.rateAsk };
       await Store.wipeAll();
       txs = []; rules = []; budgets = []; goals = []; wallets = DEF_WALLETS.slice(); categories = DEF_CATEGORIES.slice();
       state = defaultState();
+      Object.assign(state, keep);
       await Store.bulkPut('categories', categories); await Store.bulkPut('wallets', wallets);
       await saveState();
       UI.toast('همه داده‌ها واقعاً پاک شد ✅', 'ok');
+      startTrialTimer();
       render('dashboard');
     });
   }

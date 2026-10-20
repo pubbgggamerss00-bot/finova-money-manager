@@ -144,6 +144,16 @@ const Bridge = (() => {
     return false;
   }
 
+  /* ── خرید درون‌برنامه‌ای: باز کردن صفحه برنامه در اپ مایکت ──
+     myket://app?id=<package> — fallback سایت مایکت */
+  function openMyketApp() {
+    if (native && native.openMyketApp) {
+      try { native.openMyketApp(); return true; } catch (e) {}
+    }
+    try { window.open('https://myket.ir/app/com.finova.money', '_blank', 'noopener'); } catch (e) {}
+    return false;
+  }
+
   /* ── بازیابی پشتیبان: انتخابگر بومی فایل (الزامی در WebView) ──
      پاسخ جاوا: __fileCb(text) | __fileCb(null) لغو */
   function pickBackupFile() {
@@ -154,5 +164,5 @@ const Bridge = (() => {
     });
   }
 
-  return { hasNative, http, showNotification, requestNotifPermission, hasNotifPermission, biometricAuth, canBiometric, saveFile, shareFile, shareText, vibrate, toast, updateWidget, version, exitApp, openMyketRating, pickBackupFile };
+  return { hasNative, http, showNotification, requestNotifPermission, hasNotifPermission, biometricAuth, canBiometric, saveFile, shareFile, shareText, vibrate, toast, updateWidget, version, exitApp, openMyketRating, openMyketApp, pickBackupFile };
 })();

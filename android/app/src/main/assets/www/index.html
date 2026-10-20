@@ -86,7 +86,7 @@
     <div class="sp-track"><div class="sp-fill" id="spFill"></div></div>
     <div class="sp-pct" id="spPct">۰٪</div>
   </div>
-  <div class="sp-ver" id="spVer">نسخه ۱٫۴٫۰</div>
+  <div class="sp-ver" id="spVer">نسخه ۱٫۵٫۰</div>
 </div>
 <script>
 /* ── کنترل اسپلش — مستقل و قبل از ماژول‌ها در دسترس ── */
@@ -194,6 +194,22 @@ window.Splash = (function () {
   <div id="toastWrap" class="toast-wrap"></div>
   <div id="modalRoot"></div>
 </div>
+
+  <!-- ═════════ صفحه ثبت‌نام — اولین ورود ═════════ -->
+  <div id="authScreen" class="auth-screen hidden">
+    <div class="auth-bg"></div>
+    <div class="auth-card">
+      <div class="auth-logo"><img src="img/logo.png" alt="فینوا"></div>
+      <h1 class="auth-title">به فینوا خوش آمدید</h1>
+      <p class="auth-sub">حساب شخصی خودت را بساز تا تمام داده‌های مالی، اشتراک و توکن‌هایت به همین حساب وصل شود.</p>
+      <div class="auth-field"><label>نام شما (نمایشی)</label><input id="authName" placeholder="مثلاً علی" maxlength="24" autocomplete="off"></div>
+      <div class="auth-field"><label>رمز حساب (حداقل ۴ کاراکتر)</label><input id="authPass" type="password" placeholder="••••••" autocomplete="off"></div>
+      <div class="auth-field"><label>تکرار رمز</label><input id="authPass2" type="password" placeholder="••••••" autocomplete="off"></div>
+      <button class="auth-btn" id="authGoBtn">🚀 ساخت حساب و شروع</button>
+      <p class="auth-err" id="authErr"></p>
+      <p class="auth-note">🎁 با ساخت حساب، <b>۲۴ ساعت دسترسی کامل پرو</b> هدیه می‌گیری.<br>داده‌هایت فقط روی همین گوشی ذخیره می‌شود 🔒</p>
+    </div>
+  </div>
 
 <script src="js/jalali.js"></script>
 <script src="js/store.js"></script>

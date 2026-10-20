@@ -403,3 +403,91 @@ body.light .hero-chip{background:var(--card2)}
 /* بج تغییر (rate-val .d) در حالت روشن هم خوانا باشد */
 body.light .rate-val .d.up{color:#059669}
 body.light .rate-val .d.down{color:#dc2626}
+
+/* ═══ v1.5.0 — ثبت‌نام، اشتراک پرو، تایمر تست و کوارتا ═══ */
+/* ── صفحه ثبت‌نام (اولین ورود) ── */
+.auth-screen{position:fixed; inset:0; z-index:9998; background:#070C18; display:flex; align-items:center; justify-content:center; padding:22px; padding-bottom:calc(22px + env(safe-area-inset-bottom)); overflow-y:auto}
+.auth-bg{position:absolute; inset:0; pointer-events:none; background:
+  radial-gradient(520px 340px at 20% 12%, rgba(6,182,212,.16), transparent 62%),
+  radial-gradient(560px 360px at 82% 88%, rgba(217,70,239,.14), transparent 62%)}
+.auth-card{position:relative; z-index:2; width:100%; max-width:390px; background:#0B1120; border:1px solid #243250; border-radius:20px; padding:26px 22px; box-shadow:0 18px 50px rgba(0,0,0,.5), 0 0 40px rgba(34,211,238,.08); animation:authIn .45s cubic-bezier(.22,1,.36,1)}
+@keyframes authIn{from{opacity:0; transform:translateY(18px) scale(.98)} to{opacity:1; transform:none}}
+.auth-logo{width:74px; height:74px; border-radius:20px; margin:0 auto 14px; display:grid; place-items:center; background:#0f172a; border:1.5px solid #31446e; box-shadow:0 0 24px rgba(34,211,238,.25); animation:spBreathe 2.6s ease-in-out infinite}
+.auth-logo img{width:60%; height:60%; object-fit:contain}
+.auth-title{font-size:23px; font-weight:900; text-align:center; margin:0 0 4px; background:linear-gradient(90deg,#22d3ee,#e879f9); -webkit-background-clip:text; background-clip:text; color:transparent}
+.auth-sub{font-size:11.5px; color:#94a7c4; text-align:center; line-height:1.9; margin:0 0 18px}
+.auth-field{margin-bottom:12px}
+.auth-field label{display:block; font-size:11px; color:#94a7c4; margin-bottom:6px; font-weight:700}
+.auth-field input{width:100%; background:#0f172a; border:1.5px solid #243250; border-radius:12px; padding:12px 14px; color:#e6edf7; font-size:14px; font-family:inherit; outline:none; transition:border .2s, box-shadow .2s}
+.auth-field input:focus{border-color:#22d3ee; box-shadow:0 0 0 3px rgba(34,211,238,.12)}
+.auth-btn{width:100%; border:0; border-radius:13px; padding:13px; font-size:15px; font-weight:900; font-family:inherit; color:#04121c; cursor:pointer; margin-top:6px; background:linear-gradient(135deg,#22d3ee,#a78bfa); box-shadow:0 6px 22px rgba(34,211,238,.35); transition:transform .15s}
+.auth-btn:active{transform:scale(.97)}
+.auth-note{font-size:10.5px; color:#5f7396; text-align:center; line-height:1.9; margin:14px 0 0}
+.auth-err{font-size:11.5px; color:#f87171; text-align:center; min-height:16px; margin:8px 0 0; font-weight:700}
+
+/* ── تایمر نئونی قرمز دوره تست ۲۴ ساعته ── */
+.trial-timer{position:fixed; top:calc(env(safe-area-inset-top, 0px) + 70px); left:50%; transform:translateX(-50%); z-index:80;
+  display:inline-flex; align-items:center; gap:7px; white-space:nowrap; direction:rtl;
+  background:linear-gradient(135deg, rgba(127,10,25,.92), rgba(60,6,18,.94));
+  border:1.5px solid rgba(248,113,113,.75); border-radius:99px; padding:6px 15px;
+  font-family:inherit; font-size:13px; font-weight:900; color:#fecaca; cursor:pointer;
+  box-shadow:0 0 16px rgba(239,68,68,.5), 0 0 34px rgba(239,68,68,.22), inset 0 0 12px rgba(239,68,68,.14);
+  animation:trialGlow 1.5s ease-in-out infinite}
+.trial-timer small{font-size:9.5px; font-weight:700; color:rgba(254,202,202,.75)}
+.trial-timer:active{transform:translateX(-50%) scale(.96)}
+@keyframes trialGlow{0%,100%{box-shadow:0 0 14px rgba(239,68,68,.45), 0 0 30px rgba(239,68,68,.18)} 50%{box-shadow:0 0 22px rgba(239,68,68,.7), 0 0 48px rgba(239,68,68,.32)}}
+body.trial-on .view{padding-top:52px}
+@media (min-width:480px){ body.trial-on .view{padding-top:56px} }
+
+/* ── باکس طلایی «ارتقا به نسخه پرو» در صفحه خانه ── */
+.pro-cta{display:flex; flex-direction:column; align-items:center; gap:3px; width:100%; margin-top:16px; padding:17px 16px 14px;
+  position:relative; border-radius:18px; border:1.5px solid rgba(250,204,21,.65); cursor:pointer; font-family:inherit;
+  background:linear-gradient(140deg, rgba(250,204,21,.13), rgba(202,138,4,.07) 55%, rgba(250,204,21,.10));
+  box-shadow:0 0 18px rgba(250,204,21,.32), 0 0 44px rgba(250,204,21,.12), inset 0 0 18px rgba(250,204,21,.07);
+  animation:goldGlow 2.2s ease-in-out infinite; transition:transform .15s}
+.pro-cta:active{transform:scale(.98)}
+@keyframes goldGlow{0%,100%{box-shadow:0 0 16px rgba(250,204,21,.3), 0 0 40px rgba(250,204,21,.1), inset 0 0 16px rgba(250,204,21,.06)} 50%{box-shadow:0 0 26px rgba(250,204,21,.5), 0 0 62px rgba(250,204,21,.2), inset 0 0 22px rgba(250,204,21,.1)}}
+.pro-cta-ico{font-size:26px; line-height:1; filter:drop-shadow(0 0 8px rgba(250,204,21,.6))}
+.pro-cta-txt{font-size:16.5px; font-weight:900; color:#fde68a; letter-spacing:.3px}
+.pro-cta-sub{font-size:11px; font-weight:700; color:rgba(253,230,138,.8)}
+.pro-active-strip{margin-top:16px; text-align:center; font-size:12px; font-weight:800; color:var(--ok2); background:rgba(52,211,153,.08); border:1px dashed rgba(52,211,153,.4); border-radius:12px; padding:11px}
+
+/* ── صفحه/مودال پرو ── */
+.pro-modal{max-width:430px}
+.pro-head{text-align:center; margin-bottom:14px}
+.pro-badge{display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:900; color:#fde68a; background:rgba(250,204,21,.12); border:1px solid rgba(250,204,21,.5); border-radius:99px; padding:4px 13px; margin-bottom:8px}
+.pro-title{font-size:20px; font-weight:900; background:linear-gradient(90deg,#fde68a,#fbbf24,#fde68a); -webkit-background-clip:text; background-clip:text; color:transparent}
+.pro-trial-note{font-size:11px; color:var(--warn2); margin-top:7px; font-weight:700}
+.pro-feats{display:flex; flex-direction:column; gap:8px; margin:12px 0 4px}
+.pro-feat{display:flex; align-items:flex-start; gap:10px; background:rgba(255,255,255,.03); border:1px solid var(--line); border-radius:12px; padding:10px 12px}
+.pro-feat .pf-ico{font-size:17px; flex:0 0 auto; margin-top:1px}
+.pro-feat .pf-t{font-size:12.5px; font-weight:800; color:var(--txt)}
+.pro-feat .pf-s{font-size:10.5px; color:var(--txt3); line-height:1.8; margin-top:2px}
+.pro-sep{display:flex; align-items:center; gap:10px; margin:15px 0 11px; color:var(--txt3); font-size:11px; font-weight:800}
+.pro-sep::before,.pro-sep::after{content:""; flex:1; height:1px; background:var(--line)}
+.pro-methods{display:flex; flex-direction:column; gap:9px}
+.btn-gold{width:100%; border:0; border-radius:13px; padding:13px; font-size:14.5px; font-weight:900; font-family:inherit; color:#291a00; cursor:pointer;
+  background:linear-gradient(135deg,#fde68a,#f59e0b); box-shadow:0 6px 20px rgba(245,158,11,.35); transition:transform .15s}
+.btn-gold:active{transform:scale(.97)}
+.btn-token{width:100%; border:1.5px solid var(--line2); border-radius:13px; padding:13px; font-size:14px; font-weight:800; font-family:inherit; color:var(--txt); cursor:pointer; background:var(--card2); transition:transform .15s}
+.btn-token:active{transform:scale(.97)}
+.pro-method-hint{font-size:10px; color:var(--txt3); text-align:center; line-height:1.8; margin-top:8px}
+
+/* ── کارت حساب کاربری در تنظیمات ── */
+.acc-code-row{display:flex; align-items:center; gap:9px; background:rgba(255,255,255,.04); border:1px dashed var(--line2); border-radius:12px; padding:10px 13px; margin-top:9px}
+.acc-code-val{font-size:16px; font-weight:900; letter-spacing:2px; color:var(--pri2); direction:ltr; font-family:monospace}
+.acc-code-lbl{font-size:10.5px; color:var(--txt3); line-height:1.7}
+.copy-code-btn{margin-inline-start:auto; border:1px solid var(--line2); background:var(--card2); color:var(--txt); border-radius:9px; padding:7px 12px; font-size:11px; font-weight:800; font-family:inherit; cursor:pointer}
+.sub-status{display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:800; border-radius:99px; padding:4.5px 12px; margin-top:10px}
+.sub-status.pro{color:var(--ok2); background:rgba(52,211,153,.1); border:1px solid rgba(52,211,153,.4)}
+.sub-status.trial{color:var(--warn2); background:rgba(245,158,11,.1); border:1px solid rgba(245,158,11,.4)}
+.sub-status.free{color:var(--txt2); background:rgba(255,255,255,.05); border:1px solid var(--line)}
+
+/* ── بج کوارتا در دستیار آنلاین ── */
+.quota-badge{display:inline-flex; align-items:center; gap:5px; font-size:10px; font-weight:800; color:var(--pri2); background:rgba(34,211,238,.1); border:1px solid rgba(34,211,238,.35); border-radius:99px; padding:2.5px 10px; vertical-align:middle}
+.quota-badge.warn{color:var(--warn2); background:rgba(245,158,11,.1); border-color:rgba(245,158,11,.4)}
+.chip.locked{opacity:.6}
+.chip .lock-ico{font-size:9px; margin-inline-start:3px}
+.tok-hint{font-size:10.5px; color:var(--txt3); line-height:1.9; margin-top:6px}
+.tok-input{width:100%; background:var(--bg2); border:1.5px solid var(--line); border-radius:12px; padding:12px 14px; color:var(--txt); font-size:14px; font-weight:800; letter-spacing:1.5px; direction:ltr; text-align:center; font-family:monospace; outline:none; text-transform:uppercase}
+.tok-input:focus{border-color:var(--pri2); box-shadow:0 0 0 3px rgba(34,211,238,.12)}
