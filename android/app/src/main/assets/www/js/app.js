@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.9.0';
+  const APP_VERSION = '1.10.0';
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -141,7 +141,9 @@ const App = (() => {
 
   /* ═══════════ حساب کاربری، اشتراک پرو، توکن و کوارتا ═══════════ */
   const LIC_DAY = 864e5;
-  const TOK_ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // ۳۱ نویسه بدون I,L,O,0,1
+  const TOK_ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // ۳۱ نویسه بدون I,L,O,0,1 — برای کد حساب
+  // سرور مرکزی بررسی توکن‌های پرو — همه اطلاعات توکن از اینجا دریافت می‌شود
+  const TOKEN_API = 'https://muddy-finova-5405.amineshgi-1386.workers.dev';
   const PRO_FEATURES = [
     { ico: '🌐', t: 'هوش مصنوعی آنلاین روزی ۱۰ پیام', s: 'نسخه رایگان فقط ۲ پیام — پرو ۱۰ پیام در روز برای دستیار و تحلیل سرمایه‌گذاری' },
     { ico: '📈', t: 'تحلیل سرمایه‌گذاری کامل', s: 'بروزرسانی نامحدود قیمت‌های واقعی + بروزرسانی خودکار هر ۶۰ ثانیه' },
@@ -213,36 +215,100 @@ const App = (() => {
     if (state.quota.rateDay !== tk) { state.quota.rateDay = tk; state.quota.rateCount = 0; }
     state.quota.rateCount = (state.quota.rateCount || 0) + 1; saveState();
   }
-  /* — توکن فعال‌سازی PXXXX-XXXX-XXXX-XXXX با رقم کنترل — */
-  function normalizeToken(raw) {
-    return String(raw || '').toUpperCase().split('').filter(c => TOK_ALPHA.includes(c)).join('');
+  /* — توکن فعال‌سازی: بررسی آنلاین از سرور فینوا (TOKEN_API مرجع اصلی همه اطلاعات توکن) — */
+  function cleanToken(raw) {
+    return String(raw || '').toUpperCase().replace(/[^A-Z0-9-]/g, '').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '');
   }
-  function tokenCheck(body15) {
-    let s = 0;
-    for (let i = 0; i < body15.length; i++) s += (TOK_ALPHA.indexOf(body15[i]) + 1) * (i + 1);
-    return TOK_ALPHA[s % TOK_ALPHA.length];
+  function apiTokenValid(r) {
+    if (!r || typeof r !== 'object') return false;
+    if (r.valid === true) return true;
+    if (r.valid === false) return false;
+    // سازگاری با فرمت‌های دیگر پاسخ سرور (وقتی فیلد valid وجود ندارد)
+    return r.ok === true && r.active !== false && r.revoked !== true && r.consumed !== true;
   }
-  function validToken(raw) {
-    const s = normalizeToken(raw);
-    if (s.length !== 16 || s[0] !== 'P') return false;
-    return tokenCheck(s.slice(0, 15)) === s[15];
+  function pickField(r, keys) {
+    for (let i = 0; i < keys.length; i++) { const v = r[keys[i]]; if (v !== undefined && v !== null && v !== '') return v; }
+    return null;
+  }
+  function extractTokenInfo(r) {
+    const info = {};
+    try {
+      const src = (r.data && typeof r.data === 'object') ? Object.assign({}, r, r.data) : r; // پشتیبانی پاسخ تو در تو {ok, data:{...}}
+      const plan = pickField(src, ['plan', 'type', 'tier', 'name', 'title', 'label']);
+      if (plan != null) info.plan = String(plan);
+      const exp = pickField(src, ['expiresAt', 'expires_at', 'expiry', 'expires', 'expire', 'validUntil', 'valid_until', 'until', 'endAt', 'end']);
+      if (exp != null) {
+        const n = typeof exp === 'number' ? exp : Date.parse(String(exp));
+        if (!isNaN(n) && n > 0) info.expiresAt = n < 1e12 ? n * 1000 : n;   // ثانیه ← میلی‌ثانیه
+      }
+      const days = pickField(src, ['days', 'duration', 'durationDays', 'duration_days', 'period']);
+      if (days != null) { const n = parseInt(days, 10); if (n > 0) info.days = n; }
+      const months = pickField(src, ['months', 'month']);
+      if (months != null && !info.days) { const n = parseInt(months, 10); if (n > 0) info.days = n * 30; }
+      const extra = {};
+      const known = ['plan', 'type', 'tier', 'name', 'title', 'label', 'valid', 'ok', 'msg', 'message',
+        'expiresAt', 'expires_at', 'expiry', 'expires', 'expire', 'validUntil', 'valid_until', 'until', 'endAt', 'end',
+        'days', 'duration', 'durationDays', 'duration_days', 'period', 'months', 'month', 'data'];
+      for (const k in src) {
+        if (known.indexOf(k) >= 0) continue;
+        const v = src[k];
+        if (v === null || v === undefined || typeof v === 'object') continue;
+        extra[k] = String(v);
+      }
+      if (Object.keys(extra).length) info.extra = extra;
+    } catch (e) {}
+    return info;
+  }
+  async function apiCheckToken(tok) {
+    const r = await Bridge.http(TOKEN_API + '/check', 'POST',
+      { 'Content-Type': 'application/json' }, JSON.stringify({ token: tok }), 12000);
+    let j = null;
+    try { j = JSON.parse(r.body); } catch (e) {}
+    if (!j || typeof j !== 'object') {
+      if (!r.ok) return { __netFail: true };
+      return { valid: false, msg: 'پاسخ نامعتبر از سرور — کمی بعد دوباره تلاش کن' };
+    }
+    return j;
   }
   async function activateToken(raw) {
-    const tok = normalizeToken(raw);
-    if (!validToken(tok)) return { ok: false, msg: 'توکن نامعتبر است — ۱۶ نویسه به شکل PXXXX-XXXX-XXXX-XXXX' };
-    if ((state.pro.used || []).includes(tok)) return { ok: false, msg: 'این توکن قبلاً روی این حساب استفاده شده است' };
+    const tok = cleanToken(raw);
+    const dashless = tok.replace(/-/g, '');
+    if (dashless.length < 10) return { ok: false, msg: 'توکن را کامل وارد کن — فرمت PXXXX-XXXX-XXXX-XXXX' };
+    if ((state.pro.used || []).includes(dashless)) return { ok: false, msg: 'این توکن قبلاً روی این حساب استفاده شده است' };
+    let r;
+    try { r = await apiCheckToken(tok); } catch (e) { r = { __netFail: true }; }
+    if (r && r.__netFail) return { ok: false, net: true, msg: 'اتصال به سرور برقرار نشد — اینترنت را بررسی کن و دوباره تلاش کن' };
+    if (!apiTokenValid(r)) return { ok: false, msg: (r && (r.msg || r.message)) || 'توکن نامعتبر است' };
+    // سرور تأیید کرد — اعتبار بر اساس اطلاعات همین توکن از سرور محاسبه می‌شود
+    const info = extractTokenInfo(r);
+    info.at = Date.now();
     const base = Math.max(Date.now(), state.pro.expiresAt || 0);
-    state.pro.expiresAt = base + 30 * LIC_DAY;
-    state.pro.used = (state.pro.used || []).concat([tok]);
+    if (info.expiresAt) state.pro.expiresAt = Math.max(base, info.expiresAt);   // انقضای مطلق از سرور (روی هم جمع هم می‌شود)
+    else state.pro.expiresAt = base + (info.days || 30) * LIC_DAY;              // مدت از سرور یا پیش‌فرض ۳۰ روز
+    state.pro.used = (state.pro.used || []).concat([dashless]);
     state.pro.lastActivated = Date.now();
+    state.pro.apiInfo = info;
     await saveState();
     // سندیک اشتراک در رجیستری گوشی هم ثبت می‌شود (ایمنی بیشتر برای بازیابی حساب)
     try {
-      const regs = getRegistry(); const me = regs.find(r => r.code === (state.account && state.account.code));
+      const regs = getRegistry(); const me = regs.find(x => x.code === (state.account && state.account.code));
       if (me) { me.proSnapshot = state.pro; me.trialStart = state.trialStart || 0; me.quotaSnapshot = state.quota; setRegistry(regs); }
     } catch (e) {}
     removeTrialTimer();
-    return { ok: true };
+    return { ok: true, info };
+  }
+  /* ردیف‌های اطلاعات توکن (همه از سرور) — هم در مودال موفقیت هم در تنظیمات */
+  function tokenInfoRows(info) {
+    if (!info) return '';
+    const row = (lbl, val) => `<div class="toki-row"><span class="toki-l">${lbl}</span><span class="toki-v">${val}</span></div>`;
+    let h = '';
+    if (info.plan) h += row('نوع توکن', esc(info.plan));
+    h += row('تاریخ فعال‌سازی', jTsLabel(info.at || Date.now()));
+    h += row('انقضای اشتراک', jTsLabel(state.pro.expiresAt));
+    if (info.days) h += row('مدت اعتبار توکن', faDigits(info.days) + ' روز');
+    if (info.extra) for (const k in info.extra) h += row(esc(k), esc(info.extra[k]));
+    h += row('منبع تأیید', 'سرور فینوا ✅');
+    return h;
   }
   function copyText(s) {
     try { navigator.clipboard.writeText(s); } catch (e) {
@@ -482,7 +548,7 @@ const App = (() => {
           <button class="btn-gold" id="buyMyketBtn">🛒 خرید درون‌برنامه‌ای مایکت</button>
           <button class="btn-token" id="buyTokenBtn">🔑 فعال‌سازی با توکن</button>
         </div>
-        <p class="pro-method-hint">پس از خرید در مایکت، توکن فعال‌سازی را دریافت و در «فعال‌سازی با توکن» وارد می‌کنی • هر توکن ۳۰ روز اعتبار پرو اضافه می‌کند و روی هم جمع می‌شود</p>
+        <p class="pro-method-hint">پس از خرید در مایکت، توکن فعال‌سازی را دریافت و در «فعال‌سازی با توکن» وارد می‌کنی • توکن آنلاین از سرور فینوا بررسی می‌شود و اعتبارش بر اساس اطلاعات همان توکن محاسبه و روی هم جمع می‌شود</p>
       </div>`);
     m.querySelector('#buyMyketBtn').onclick = () => {
       try { if (Bridge.openMyketApp) { Bridge.openMyketApp(); return; } } catch (e) {}
@@ -495,8 +561,8 @@ const App = (() => {
       <p style="font-size:12px;color:var(--txt2);line-height:1.9;margin:0 0 10px">هنگام خرید توکن، <b>کد حساب</b> زیر را ارائه کن تا توکن به حساب تو وصل شود:</p>
       <div class="acc-code-row"><div><div class="acc-code-lbl">کد حساب تو</div><div class="acc-code-val">${esc(state.account ? state.account.code : '—')}</div></div><button class="copy-code-btn" id="copyAccBtn2">📋 کپی</button></div>
       <div style="height:12px"></div>
-      <input id="tokInp" class="tok-input" placeholder="PXXXX-XXXX-XXXX-XXXX" maxlength="19" autocomplete="off">
-      <p class="tok-hint">هر توکن ۳۰ روز اشتراک پرو اضافه می‌کند و توکن‌های بعدی روی هم جمع می‌شوند • توکن یک‌بارمصرف است</p>
+      <input id="tokInp" class="tok-input" placeholder="PXXXX-XXXX-XXXX-XXXX" maxlength="24" autocomplete="off">
+      <p class="tok-hint">توکن آنلاین از سرور فینوا بررسی می‌شود • اعتبار بر اساس اطلاعات سرور همان توکن محاسبه و روی هم جمع می‌شود • توکن یک‌بارمصرف است</p>
       <p id="tokErr" style="font-size:11.5px;color:var(--bad2);font-weight:700;min-height:16px;margin:4px 0 0"></p>
       <div class="btn-row"><button class="btn full" id="tokGoBtn">فعال‌سازی پرو ✨</button><button class="btn ghost" id="tokXBtn">بستن</button></div>`);
     const inp = m.querySelector('#tokInp');
@@ -505,16 +571,39 @@ const App = (() => {
     m.querySelector('#tokXBtn').onclick = () => m.remove();
     m.querySelector('#tokGoBtn').onclick = async () => {
       const v = inp.value.trim();
-      if (!v) { m.querySelector('#tokErr').textContent = 'توکن را وارد کن'; return; }
+      const err = m.querySelector('#tokErr');
+      const go = m.querySelector('#tokGoBtn');
+      if (!v) { err.textContent = 'توکن را وارد کن'; return; }
+      go.disabled = true; go.textContent = '⏳ در حال بررسی از سرور…';
+      err.textContent = '';
       const r = await activateToken(v);
-      if (!r.ok) { m.querySelector('#tokErr').textContent = r.msg; return; }
+      go.disabled = false; go.textContent = 'فعال‌سازی پرو ✨';
+      if (!r.ok) { err.textContent = r.msg; return; }
       m.remove();
+      // پاک‌سازی مودال‌های قدیمی (مثل مودال فروش پرو) — کاربر دیگر پرو است و نباید ببیندها
+      Array.from(document.querySelectorAll('.modal-backdrop')).forEach(x => x.remove());
       Bridge.vibrate(80);
       UI.toast('🎉 اشتراک پرو فعال شد تا ' + jTsLabel(state.pro.expiresAt), 'ok');
       Bridge.showNotification('⭐ فینوا پرو فعال شد', 'اشتراک پرو تا ' + jTsLabel(state.pro.expiresAt) + ' فعال است. همه قابلیت‌ها آزاد شدند!', 9901, 'proOn');
       render(curTab);
+      tokenInfoModal(r.info);
     };
     setTimeout(() => { try { inp.focus(); } catch (e) {} }, 150);
+  }
+  /* مودال موفقیت فعال‌سازی — نمایش همه اطلاعات توکن دریافتی از سرور */
+  function tokenInfoModal(info) {
+    const m = UI.modal('✅ توکن تأیید شد', `
+      <div class="toki-modal">
+        <div class="toki-hero">
+          <div class="toki-ico">🎉</div>
+          <div class="toki-title">اشتراک پرو فعال شد!</div>
+          <div class="toki-sub">توکن آنلاین از سرور فینوا تأیید شد</div>
+        </div>
+        <div class="toki-card">${tokenInfoRows(info)}</div>
+        <p class="toki-hint">همه اطلاعات این توکن از سرور فینوا دریافت و روی این حساب ثبت شد • اعتبار با توکن‌های بعدی روی هم جمع می‌شود</p>
+        <div class="btn-row"><button class="btn full" id="tokiOkBtn">عالیه! 🌟</button></div>
+      </div>`);
+    m.querySelector('#tokiOkBtn').onclick = () => m.remove();
   }
   function subStatusHTML() {
     const pe = proExpiresAt();
@@ -1685,6 +1774,7 @@ const App = (() => {
         <div><div class="acc-code-lbl">کد حساب — هنگام خرید توکن پرو ارائه کن</div><div class="acc-code-val">${esc(acc.code)}</div></div>
         <button class="copy-code-btn" id="copyAccBtn">📋 کپی</button>
       </div>
+      ${(isPro() && state.pro && state.pro.apiInfo) ? `<div class="toki-card toki-mini" style="margin-top:10px"><div class="toki-mini-t">🔑 اطلاعات آخرین توکن — تأییدشده از سرور فینوا</div>${tokenInfoRows(state.pro.apiInfo)}</div>` : ''}
       ${!isPro() ? '<button class="btn-gold" id="proUpBtn" style="margin-top:12px">⭐ ارتقا به نسخه پرو</button>' : ''}
     </div>` : ''}
     ${acc ? `
