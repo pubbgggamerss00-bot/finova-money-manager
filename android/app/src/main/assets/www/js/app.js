@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.6.0';
+  const APP_VERSION = '1.7.0';
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -47,6 +47,9 @@ const App = (() => {
     // همیشه با مقادیر پیش‌فرض ادغام کن — فیلدهای جدید نسخه‌ها برای کاربران قدیمی هم ساخته شوند
     state = Object.assign(defaultState(), state, { v: 2 });
     state.rateAsk = Object.assign({ done: false, laterAt: 0, never: false }, state.rateAsk || {});
+    // تم برنامه — برای کاربران قدیمی و مقدار نامعتبر → نئون
+    if (!['neon', 'classic', 'pop'].includes(state.theme)) state.theme = 'neon';
+    state.themeChanges = +(state.themeChanges || 0) || 0;
     // فیلدهای حساب/اشتراک — برای کاربران قدیمی هم ساخته شوند
     state.account = state.account || null;
     state.trialStart = +state.trialStart || 0;
@@ -106,6 +109,7 @@ const App = (() => {
   function defaultState() {
     return {
       v: 2, dark: true, fontScale: 1,
+      theme: 'neon', themeChanges: 0,          // شخصی‌سازی: تم فعال + تعداد تغییر رایگان
       lock: { enabled: false, pinHash: '', salt: '' },
       strict: { enabled: false, pct: 20 },
       notify: { days: [7, 3, 1], budgetAlert: true, balanceAlert: true },
@@ -140,6 +144,7 @@ const App = (() => {
     { ico: '🧮', t: 'حساب‌گر سود بدون محدودیت', s: 'نسخه رایگان فقط ۲ بار محاسبه دارد' },
     { ico: '🧾', t: 'گزارش PDF ماه جاری + کارت اشتراکی', s: 'خروجی PDF حرفه‌ای و کارت قابل اشتراک‌گذاری' },
     { ico: '🔐', t: 'پشتیبان رمزنگاری‌شده نامحدود', s: 'پشتیبان AES-256 با رمز دلخواه — بدون سقف' },
+    { ico: '🎨', t: 'شخصی‌سازی کامل با تم‌های حرفه‌ای', s: 'تم کلاسیک طلایی، مدرن پاپ و نئون + تغییر نامحدود ظاهر برنامه' },
   ];
   const PRO_REASONS = {
     ai: 'پیام‌های رایگان هوش مصنوعی آنلاین تمام شد (۲ پیام).',
@@ -150,8 +155,9 @@ const App = (() => {
     pdf: 'خروجی PDF مخصوص نسخه پرو است.',
     card: 'کارت اشتراکی مخصوص نسخه پرو است.',
     backup: 'پشتیبان رمزنگاری‌شده مخصوص نسخه پرو است (نامحدود).',
+    personalization: 'فرصت تغییر تم رایگان (۱ بار) استفاده شده — شخصی‌سازی کامل مخصوص نسخه پرو است.',
     trial: 'برای ادامه استفاده کامل، نسخه پرو را فعال کن.',
-    home: 'با ارتقا، ۶ قابلیت حرفه‌ای فعال می‌شود.',
+    home: 'با ارتقا، همه قابلیت‌های حرفه‌ای فعال می‌شود.',
   };
   function newAccCode() {
     const buf = new Uint8Array(6); crypto.getRandomValues(buf);
@@ -1683,6 +1689,21 @@ const App = (() => {
       <button class="btn-logout" id="logoutBtn">🚪 خروج از حساب کاربری</button>
     </div>` : ''}
     <div class="card">
+      <div class="card-title">🎨 شخصی‌سازی ${isPro() ? '<span class="pers-badge" style="background:rgba(16,185,129,.14);color:var(--ok2);border-color:rgba(16,185,129,.4)">پرو — نامحدود</span>' : `<span class="pers-badge">${isPro() ? '' : 'فرصت رایگان: ' + faDigits(Math.max(0, 1 - (state.themeChanges || 0)))} بار</span>`}</div>
+      <p style="font-size:11.5px;color:var(--txt2);line-height:1.9;margin:0 0 6px">ظاهر فینوا را به سلیقه خودت عوض کن — با هر تم، رنگ‌ها، فونت اعداد و انیمیشن‌های برنامه عوض می‌شود.</p>
+      <div class="theme-grid">
+        ${Object.keys(THEMES).map(k => {
+          const locked = !isPro() && (state.themeChanges || 0) >= 1 && state.theme !== k;
+          return `<button class="theme-opt ${state.theme === k ? 'on' : ''}" data-theme-opt="${k}" aria-label="تم ${THEMES[k].name}" aria-pressed="${state.theme === k}">
+            ${locked ? `<span class="t-lock">${LOCK_SVG}</span>` : ''}
+            <span class="tp tp-${k}">${k === 'classic' ? '<i></i><b>۸۵</b><u></u><s></s>' : k === 'pop' ? '<i></i><b></b><u></u>' : '<i></i><b></b><u></u>'}</span>
+            <span class="theme-name">${THEMES[k].name}<small>${state.theme === k ? '✓ فعال' : THEMES[k].desc}</small></span>
+          </button>`;
+        }).join('')}
+      </div>
+      ${!isPro() ? `<p class="hint" style="margin-top:9px">🎨 شخصی‌سازی کامل مخصوص <b>نسخه پرو</b> است — نسخه رایگان فقط <b>${faDigits(1)}</b> بار می‌تواند تم را تغییر دهد.${(state.themeChanges || 0) >= 1 ? '<br>فرصت رایگانت تمام شده؛ برای تغییر تم‌های دیگر نسخه پرو را فعال کن ⭐' : ''}</p>` : ''}
+    </div>
+    <div class="card">
       <div class="card-title">🔐 قفل و امنیت</div>
       <div class="switch-row"><span>قفل با رمز (PIN ۴ رقمی)</span><label class="switch"><input type="checkbox" id="swLock" ${state.lock && state.lock.enabled ? 'checked' : ''}><span class="sw"></span></label></div>
       <div class="switch-row"><span>حالت سختگیرانه (هشدار قبل از خرید غیرضروری)</span><label class="switch"><input type="checkbox" id="swStrict" ${state.strict && state.strict.enabled ? 'checked' : ''}><span class="sw"></span></label></div>
@@ -1763,10 +1784,56 @@ const App = (() => {
       else Bridge.exitApp();
     };
   }
+  /* ── تم روز/شب + تم‌های شخصی‌سازی (نئون / کلاسیک / پاپ) ── */
+  const THEMES = {
+    neon: { name: 'نئون', desc: 'پیش‌فرض فینوا' },
+    classic: { name: 'کلاسیک', desc: 'طلایی سلطنتی' },
+    pop: { name: 'مدرن پاپ', desc: 'پرانرژی و رنگی' },
+  };
+  const THEME_META_COLOR = {
+    neon: { dark: '#0b1120', light: '#eef2f9' },
+    classic: { dark: '#070a14', light: '#f2ead4' },
+    pop: { dark: '#0c0c1d', light: '#eef0fa' },
+  };
   function applyTheme() {
+    const th = THEMES[state.theme] ? state.theme : 'neon';
+    document.body.dataset.theme = th;
     document.body.classList.toggle('light', !state.dark);
-    document.querySelector('meta[name=theme-color]').setAttribute('content', state.dark ? '#0b1120' : '#eef2f9');
+    const mc = THEME_META_COLOR[th];
+    document.querySelector('meta[name=theme-color]').setAttribute('content', state.dark ? mc.dark : mc.light);
     document.getElementById('themeBtn').textContent = state.dark ? '🌙' : '☀️';
+  }
+  /* — فلش رنگی هنگام تعویض تم — */
+  function themeFlash() {
+    try {
+      const grads = {
+        neon: 'linear-gradient(135deg,#06b6d4,#d946ef)',
+        classic: 'linear-gradient(135deg,#fff1c2,#b8902b 45%,#6e5216)',
+        pop: 'linear-gradient(120deg,#6a3dff,#ff3d8b,#ff9a3d)',
+      };
+      const f = document.createElement('div');
+      f.className = 'theme-flash';
+      f.style.background = grads[state.theme] || grads.neon;
+      document.body.appendChild(f);
+      setTimeout(() => { try { f.remove(); } catch (e) {} }, 780);
+      document.body.classList.add('theme-swap');
+      setTimeout(() => document.body.classList.remove('theme-swap'), 680);
+    } catch (e) {}
+  }
+  /* — انتخاب تم از بخش شخصی‌سازی (پرو نامحدود، رایگان ۱ بار) — */
+  async function applyAppTheme(t) {
+    if (!THEMES[t]) return;
+    if (state.theme === t) { UI.toast('این تم همین حالا فعال است ✨', 'ok'); return; }
+    if (!isPro()) {
+      if ((state.themeChanges || 0) >= 1) return showProModal('personalization');
+    }
+    state.theme = t;
+    if (!isPro()) state.themeChanges = (state.themeChanges || 0) + 1;
+    applyTheme();
+    themeFlash();
+    await saveState();
+    UI.toast(`تم «${THEMES[t].name}» فعال شد 🎨`, 'ok');
+    if (curTab === 'settings') render('settings');
   }
   function viewClickHandler(e) {
     const t = e.target;
@@ -1814,6 +1881,9 @@ const App = (() => {
     if (t.closest('#proCta') || t.closest('#proUpBtn')) return showProModal('home');
     if (t.closest('#logoutBtn')) return logoutConfirm();
     if (t.closest('#copyAccBtn')) return copyText(state.account ? state.account.code : '');
+    // شخصی‌سازی — انتخاب تم
+    const thOpt = t.closest('[data-theme-opt]');
+    if (thOpt) return applyAppTheme(thOpt.dataset.themeOpt);
     if (t.closest('#bkEncBtn')) { if (!isPro()) return showProModal('backup'); return backupFile(true); }   // پشتیبان رمزنگاری‌شده: پرو (نامحدود)
     if (t.closest('#bkPlainBtn')) return backupFile(false);
     if (t.closest('#restoreBtn')) return pickFileAndRestore();

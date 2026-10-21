@@ -542,3 +542,227 @@ body.trial-on .view{padding-top:52px}
 /* ═══ لرزش کارت هنگام خطا ═══ */
 .auth-card.shake{animation:authShake .4s ease}
 @keyframes authShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-7px)}40%{transform:translateX(7px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}
+
+/* ═══════════════ v1.7.0 — شخصی‌سازی: تم نئون / کلاسیک / پاپ ═══════════════ */
+@font-face{font-family:'Amiri';src:url('../fonts/Amiri-Regular.woff2') format('woff2');font-weight:400;font-display:swap}
+@font-face{font-family:'Amiri';src:url('../fonts/Amiri-Bold.woff2') format('woff2');font-weight:700;font-display:swap}
+
+/* ── انیمیشن‌های مشترک تم‌ها ── */
+@keyframes thShine{0%{transform:translateX(-170%) skewX(-20deg)}100%{transform:translateX(560%) skewX(-20deg)}}
+@keyframes spinSlow{to{transform:rotate(360deg)}}
+@keyframes thFlow{0%{background-position:0% 50%}100%{background-position:300% 50%}}
+@keyframes popRise{from{opacity:0;transform:translateY(38px) scale(.95)}to{opacity:1;transform:none}}
+@keyframes popFloaty{0%,100%{transform:translateY(0) rotate(0deg)}50%{transform:translateY(-14px) rotate(12deg)}}
+@keyframes popFabBob{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-6px)}}
+@keyframes clGoldPulse{0%,100%{box-shadow:0 0 22px rgba(212,175,55,.24),0 14px 38px rgba(0,0,0,.6)}50%{box-shadow:0 0 32px rgba(244,220,138,.42),0 14px 38px rgba(0,0,0,.6)}}
+@keyframes fabGoldGlow{0%,100%{box-shadow:0 0 18px rgba(212,175,55,.5),0 8px 18px rgba(0,0,0,.6)}50%{box-shadow:0 0 30px rgba(244,220,138,.85),0 8px 18px rgba(0,0,0,.6)}}
+@keyframes thSwap{0%{opacity:.22;transform:scale(.982);filter:saturate(.35)}100%{opacity:1;transform:none;filter:none}}
+@keyframes thFlash{0%{opacity:.9}100%{opacity:0}}
+body.theme-swap #appRoot{animation:thSwap .62s cubic-bezier(.3,1,.3,1)}
+.theme-flash{position:fixed;inset:0;z-index:99998;pointer-events:none;opacity:0;animation:thFlash .72s ease-out forwards}
+
+/* ── نقاط شناور تزئینی (فقط تم پاپ) ── */
+#themeDeco{display:none;pointer-events:none;position:fixed;inset:0;z-index:0}
+body[data-theme="pop"] #themeDeco{display:block}
+#themeDeco i{position:absolute;opacity:.85;animation:popFloaty 6s ease-in-out infinite}
+#themeDeco i:nth-child(1){top:16%;left:3.5%;width:14px;height:14px;border-radius:50%;background:#c6ff3d}
+#themeDeco i:nth-child(2){top:46%;right:2.5%;width:12px;height:12px;background:#3dd9ff;transform:rotate(45deg);animation-delay:1s;animation-duration:7s}
+#themeDeco i:nth-child(3){top:74%;left:3%;width:16px;height:16px;border-radius:4px;background:#ff9a3d;animation-delay:.5s;animation-duration:8s}
+
+/* ═════════ تم کلاسیک — طلایی سلطنتی ═════════ */
+body[data-theme="classic"]{
+  --bg:#070a14; --bg2:#0a0f1f; --card:#121830; --card2:#1a2038;
+  --line:rgba(212,175,55,.30); --line2:rgba(212,175,55,.5);
+  --txt:#f3ecd8; --txt2:#cdbf95; --txt3:#a99f86;
+  --pri:#f0d27a; --pri2:#e8c75f; --neon:#f0d27a;
+  --acc:#e8c75f; --acc2:#fff1c2;
+  --ok:#2f9a72; --ok2:#5fd9ad; --warn:#d97706; --warn2:#fbbf24;
+  --bad:#c0303b; --bad2:#ff8d96;
+  --gold:#eab308; --usd:#f0d27a;
+  --grad-neon:linear-gradient(135deg,#e8c75f 0%,#b8902b 100%);
+  --grad-ok:linear-gradient(135deg,#2f9a72,#5fd9ad);
+  --grad-bad:linear-gradient(135deg,#c0303b,#ff8d96);
+  --shadow:0 12px 34px rgba(0,0,0,.55);
+  --glow:0 0 14px rgba(212,175,55,.38);
+  --glow-acc:0 0 14px rgba(212,175,55,.3);
+  --r:16px; --r-sm:12px;
+}
+body[data-theme="classic"] .app-root{background:
+  radial-gradient(440px 320px at 50% -4%, rgba(212,175,55,.17), transparent 65%),
+  radial-gradient(360px 300px at 100% 70%, rgba(120,40,60,.18), transparent 65%),
+  repeating-linear-gradient(45deg, rgba(212,175,55,.028) 0px, rgba(212,175,55,.028) 1px, transparent 1px, transparent 14px),
+  var(--bg)}
+body[data-theme="classic"] .topbar{border-bottom:1px solid rgba(212,175,55,.4); background:color-mix(in srgb, #070a14 84%, transparent)}
+body[data-theme="classic"] .brand-glyph{border:none;border-radius:50%;background:linear-gradient(135deg,#fff1c2 0%,#b8902b 45%,#6e5216 60%,#e6c25a 100%);box-shadow:0 0 16px rgba(212,175,55,.45), inset 0 0 0 2.5px #0a0e1a}
+body[data-theme="classic"] .brand-text strong,
+body[data-theme="classic"] .hero-amount,
+body[data-theme="classic"] .hero-chip .v,
+body[data-theme="classic"] .card-title,
+body[data-theme="classic"] .stat .v,
+body[data-theme="classic"] .row-amount,
+body[data-theme="classic"] .nav-btn .nv-txt{font-family:'Amiri','Vazirmatn',serif; letter-spacing:.02em}
+body[data-theme="classic"] .card{border:1px solid rgba(212,175,55,.30); background:linear-gradient(180deg,#131a33,#0c1226); box-shadow:0 10px 28px rgba(0,0,0,.5)}
+body[data-theme="classic"] .card.glow{border-color:rgba(212,175,55,.55); box-shadow:0 0 20px rgba(212,175,55,.16), 0 10px 28px rgba(0,0,0,.5)}
+body[data-theme="classic"] .hero{
+  border:1.5px solid transparent;
+  background:
+    radial-gradient(circle at 12% 125%, rgba(212,175,55,.24), transparent 55%),
+    linear-gradient(135deg,#1a1336 0%,#0e1a30 62%,#0a1424 100%) padding-box,
+    linear-gradient(135deg,#fff1c2 0%,#b8902b 35%,#6e5216 55%,#e6c25a 80%,#fff1c2 100%) border-box;
+  box-shadow:0 0 26px rgba(212,175,55,.25),0 14px 38px rgba(0,0,0,.6);
+  animation:clGoldPulse 4.2s ease-in-out infinite;
+}
+body[data-theme="classic"] .hero::after{background:radial-gradient(closest-side, rgba(212,175,55,.2), transparent)}
+body[data-theme="classic"] .hero::before{content:"";position:absolute;top:0;bottom:0;width:54px;right:0;background:linear-gradient(90deg,transparent,rgba(255,241,194,.15),transparent);animation:thShine 4.4s ease-in-out infinite;z-index:1;pointer-events:none}
+body[data-theme="classic"] .hero-chip{border-color:rgba(212,175,55,.38); background:linear-gradient(135deg, rgba(255,255,255,.06), rgba(255,255,255,.015))}
+body[data-theme="classic"] .icon-btn{border-radius:50%; border:1px solid rgba(212,175,55,.5); background:linear-gradient(160deg,#161c33,#0a0e1a); color:#f0d27a; box-shadow:0 0 12px rgba(212,175,55,.28)}
+body[data-theme="classic"] .bottom-nav{border-top:1px solid rgba(212,175,55,.45); background:linear-gradient(180deg,#0f1427,#06080f)}
+body[data-theme="classic"] .nav-btn{color:#9a9078}
+body[data-theme="classic"] .nav-btn.active{color:#f0d27a}
+body[data-theme="classic"] .nav-btn.active .nv-ico{text-shadow:0 0 12px rgba(212,175,55,.85)}
+body[data-theme="classic"] .nav-btn.active::before{background:linear-gradient(90deg,#b8902b,#fff1c2); box-shadow:0 0 10px rgba(244,220,138,.8)}
+body[data-theme="classic"] .fab{background:radial-gradient(circle at 32% 26%, #fff6d0 0%, #e8c75f 46%, #a47a1c 100%); color:#2a1d05; animation:fabGoldGlow 3.2s ease-in-out infinite}
+body[data-theme="classic"] .btn.ghost{border-color:rgba(212,175,55,.55); color:#f0d27a}
+body[data-theme="classic"] .chip{border-color:rgba(212,175,55,.4)}
+body[data-theme="classic"] .chip.on{background:rgba(212,175,55,.16); border-color:#f0d27a; color:#f0d27a; box-shadow:0 0 10px rgba(212,175,55,.3)}
+body[data-theme="classic"] .theme-flash{background:linear-gradient(135deg,#fff1c2,#b8902b 45%,#6e5216)}
+/* کلاسیک روشن — پوست کاغذی */
+body.light[data-theme="classic"]{
+  --bg:#f2ead4; --bg2:#ece1c6; --card:#fbf6e9; --card2:#f4ecd9;
+  --line:#dcc78e; --line2:#c3a75f;
+  --txt:#2b2109; --txt2:#6d5c34; --txt3:#97865c;
+  --pri:#a47a1c; --pri2:#8a6a1d; --neon:#a47a1c;
+  --acc:#b8902b; --acc2:#8a6a1d;
+  --ok:#0e7a54; --ok2:#0c6b49; --bad:#c0303b; --bad2:#a8262f;
+  --shadow:0 10px 26px rgba(90,70,20,.16);
+  --glow:0 0 10px rgba(164,122,28,.3);
+  --glow-acc:0 0 10px rgba(164,122,28,.22);
+}
+body.light[data-theme="classic"] .app-root{background:radial-gradient(440px 320px at 50% -4%, rgba(184,144,43,.15), transparent 65%), var(--bg)}
+body.light[data-theme="classic"] .card{border-color:#d9c48c; background:linear-gradient(180deg,#fdf9ef,#f6efdc); box-shadow:0 10px 26px rgba(90,70,20,.14)}
+body.light[data-theme="classic"] .card.glow{border-color:#c3a75f; box-shadow:0 0 16px rgba(164,122,28,.2), 0 10px 26px rgba(90,70,20,.14)}
+body.light[data-theme="classic"] .hero-chip{border-color:#d9c48c; background:#f8f2e0}
+body.light[data-theme="classic"] .icon-btn{background:linear-gradient(160deg,#fffdf6,#f2e8cf); color:#8a6a1d; border-color:#d3bd82; box-shadow:none}
+body.light[data-theme="classic"] .topbar{background:color-mix(in srgb, #f2ead4 86%, transparent); border-bottom:1px solid #d3bd82}
+body.light[data-theme="classic"] .hero{border:1.5px solid transparent; background:linear-gradient(135deg,#fffdf6,#f8efd8) padding-box, linear-gradient(135deg,#b8902b,#e6c25a,#b8902b) border-box; animation:none; box-shadow:0 10px 26px rgba(90,70,20,.18)}
+body.light[data-theme="classic"] .hero::before{display:none}
+body.light[data-theme="classic"] .hero::after{background:radial-gradient(closest-side, rgba(184,144,43,.15), transparent)}
+body.light[data-theme="classic"] .hero-amount,
+body.light[data-theme="classic"] .hero-chip .v{color:#7a5a14}
+body.light[data-theme="classic"] .fab{animation:fabGoldGlow 3.2s ease-in-out infinite}
+body.light[data-theme="classic"] .theme-flash{background:linear-gradient(135deg,#e6c25a,#a47a1c)}
+
+/* ═════════ تم پاپ — مدرن و پرانرژی ═════════ */
+body[data-theme="pop"]{
+  --bg:#0c0c1d; --bg2:#12122a; --card:#17173a; --card2:#12122a;
+  --line:#2b2b55; --line2:#3f3f7a;
+  --txt:#ffffff; --txt2:#9a9ec4; --txt3:#676b95;
+  --pri:#c6ff3d; --pri2:#3dd9ff; --neon:#c6ff3d;
+  --acc:#ff3d8b; --acc2:#ff7ab0;
+  --ok:#059669; --ok2:#c6ff3d; --warn:#ff9a3d; --warn2:#ffe53d;
+  --bad:#ff3d5a; --bad2:#ff7a8e;
+  --gold:#ffe53d; --usd:#3dd9ff;
+  --grad-neon:linear-gradient(120deg,#6a3dff 0%,#ff3d8b 50%,#ff9a3d 100%);
+  --grad-ok:linear-gradient(135deg,#8fd400,#c6ff3d);
+  --grad-bad:linear-gradient(135deg,#e0245e,#ff5a76);
+  --shadow:0 8px 0 rgba(4,4,14,.85);
+  --glow:0 0 16px rgba(198,255,61,.28);
+  --glow-acc:0 0 16px rgba(255,61,139,.3);
+  --r:26px; --r-sm:20px;
+}
+body[data-theme="pop"] .app-root{background:
+  radial-gradient(360px 300px at 0% 0%, rgba(106,61,255,.35), transparent 65%),
+  radial-gradient(340px 300px at 100% 55%, rgba(255,61,139,.22), transparent 65%),
+  var(--bg)}
+body[data-theme="pop"] .view>*{animation:popRise .55s cubic-bezier(.2,1.1,.3,1) both}
+body[data-theme="pop"] .view>*:nth-child(2){animation-delay:.07s}
+body[data-theme="pop"] .view>*:nth-child(3){animation-delay:.14s}
+body[data-theme="pop"] .view>*:nth-child(4){animation-delay:.21s}
+body[data-theme="pop"] .view>*:nth-child(5){animation-delay:.28s}
+body[data-theme="pop"] .view>*:nth-child(6){animation-delay:.35s}
+body[data-theme="pop"] .view>*:nth-child(7){animation-delay:.42s}
+body[data-theme="pop"] .view>*:nth-child(8){animation-delay:.49s}
+body[data-theme="pop"] .topbar{background:color-mix(in srgb, #0c0c1d 82%, transparent); border-bottom:2px solid #23234a}
+body[data-theme="pop"] .brand-glyph{position:relative; border-radius:14px; border:none; background:#12122a; box-shadow:0 0 14px rgba(198,255,61,.25)}
+body[data-theme="pop"] .brand-glyph::before{content:""; position:absolute; inset:-40%; background:conic-gradient(from 0deg,#c6ff3d,#3dd9ff,#ff3d8b,#ff9a3d,#c6ff3d); animation:spinSlow 5s linear infinite}
+body[data-theme="pop"] .brand-glyph img{position:relative; z-index:1; border-radius:12px; background:#12122a; box-shadow:0 0 0 2.5px #12122a}
+body[data-theme="pop"] .icon-btn{border-radius:14px; border:none; background:var(--card2); box-shadow:0 4px 0 rgba(4,4,14,.9)}
+body[data-theme="pop"] .icon-btn:active{transform:translateY(2px) scale(.96)}
+body[data-theme="pop"] .hero{
+  border:none; border-radius:30px;
+  background:linear-gradient(120deg,#6a3dff,#ff3d8b,#ff9a3d,#6a3dff);
+  background-size:300% 100%;
+  animation:popHeroFlow 9s linear infinite, popRise .55s cubic-bezier(.2,1.1,.3,1) both;
+  box-shadow:0 8px 0 #3b1fa8;
+}
+@keyframes popHeroFlow{0%{background-position:0% 50%}100%{background-position:300% 50%}}
+body[data-theme="pop"] .hero::after{width:150px;height:150px;border:20px solid rgba(255,255,255,.13);background:radial-gradient(closest-side,transparent,transparent);border-radius:50%;animation:spinSlow 16s linear infinite;top:-52px;left:-38px}
+body[data-theme="pop"] .hero-chip{border:none; border-radius:22px; background:rgba(255,255,255,.12); box-shadow:0 4px 0 rgba(30,8,80,.35)}
+body[data-theme="pop"] .card{border:2px solid #2b2b55; border-radius:26px}
+body[data-theme="pop"] .card.glow{border-color:rgba(198,255,61,.4)}
+body[data-theme="pop"] .btn{border-radius:18px; box-shadow:0 5px 0 rgba(4,4,14,.9)}
+body[data-theme="pop"] .btn:active{transform:translateY(3px) scale(.98)}
+body[data-theme="pop"] .btn.ghost{border-width:2px; border-radius:18px}
+body[data-theme="pop"] .btn-gold{border-radius:18px; box-shadow:0 5px 0 rgba(120,84,10,.7)}
+body[data-theme="pop"] .pro-cta-img{border-radius:22px; box-shadow:0 7px 0 rgba(4,4,14,.9)}
+body[data-theme="pop"] .chip{border-radius:14px}
+body[data-theme="pop"] .chip.on{background:#c6ff3d; border-color:#c6ff3d; color:#0c0c1d; box-shadow:0 3px 0 #7aa800}
+body[data-theme="pop"] .bottom-nav{background:linear-gradient(180deg,#12122a,#07071a); border-top:2px solid #23234a}
+body[data-theme="pop"] .nav-btn.active{color:#c6ff3d}
+body[data-theme="pop"] .nav-btn.active .nv-ico{text-shadow:0 0 14px rgba(198,255,61,.85)}
+body[data-theme="pop"] .nav-btn.active::before{background:linear-gradient(90deg,#c6ff3d,#3dd9ff); width:40px; height:4px}
+body[data-theme="pop"] .fab{background:linear-gradient(135deg,#c6ff3d,#3dd9ff); color:#04283a; box-shadow:0 6px 0 #0f7a91, 0 0 24px rgba(198,255,61,.35); animation:popFabBob 2.6s ease-in-out infinite}
+body[data-theme="pop"] .fab:active{animation:none}
+body[data-theme="pop"] .row-item{border-radius:var(--r-sm)}
+body[data-theme="pop"] .theme-flash{background:linear-gradient(120deg,#6a3dff,#ff3d8b,#ff9a3d)}
+/* پاپ روشن */
+body.light[data-theme="pop"]{
+  --bg:#eef0fa; --bg2:#e4e7f6; --card:#ffffff; --card2:#f2f4fc;
+  --line:#dcdff0; --line2:#c4c9e8;
+  --txt:#191932; --txt2:#5a5e85; --txt3:#8b90b5;
+  --pri:#7aa800; --pri2:#3d8f00; --neon:#7aa800;
+  --acc:#d61f7a; --acc2:#b8165f;
+  --ok2:#0a8f00; --bad2:#d61f4d; --warn2:#b45309;
+  --shadow:0 6px 0 rgba(20,20,60,.12);
+  --glow:0 0 12px rgba(122,168,0,.25);
+  --glow-acc:0 0 12px rgba(214,31,122,.2);
+}
+body.light[data-theme="pop"] .app-root{background:
+  radial-gradient(360px 300px at 0% 0%, rgba(106,61,255,.14), transparent 65%),
+  radial-gradient(340px 300px at 100% 55%, rgba(255,61,139,.10), transparent 65%),
+  var(--bg)}
+body.light[data-theme="pop"] .hero{animation:popHeroFlow 9s linear infinite, popRise .55s cubic-bezier(.2,1.1,.3,1) both; box-shadow:0 7px 0 rgba(59,31,168,.35)}
+body.light[data-theme="pop"] .card{border-color:#dcdff0}
+body.light[data-theme="pop"] .icon-btn{background:#ffffff; box-shadow:0 3px 0 rgba(20,20,60,.10)}
+body.light[data-theme="pop"] .theme-flash{background:linear-gradient(120deg,#6a3dff,#ff3d8b,#ff9a3d)}
+
+/* ═════════ کارت‌های انتخاب تم — بخش شخصی‌سازی ═════════ */
+.theme-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:6px}
+.theme-opt{position:relative; display:flex; flex-direction:column; align-items:center; gap:7px; padding:10px 6px 11px; border-radius:16px; border:2px solid var(--line); background:var(--card2); transition:.2s; overflow:hidden}
+.theme-opt:active{transform:scale(.94)}
+.theme-opt.on{border-color:var(--pri); box-shadow:var(--glow)}
+.theme-opt.on::after{content:"✓"; position:absolute; top:5px; left:6px; width:18px; height:18px; border-radius:50%; background:var(--pri); color:#04121c; font-size:11px; font-weight:900; display:grid; place-items:center; z-index:3}
+body[data-theme="classic"] .theme-opt.on::after{color:#1a1204}
+body[data-theme="pop"] .theme-opt.on::after{color:#0c0c1d}
+.tp{width:100%; height:76px; border-radius:11px; position:relative; overflow:hidden; border:1px solid rgba(255,255,255,.09)}
+/* پیش‌نمایش نئون */
+.tp-neon{background:radial-gradient(42px 28px at 82% 0%, rgba(139,92,246,.55), transparent 70%), radial-gradient(36px 26px at 8% 100%, rgba(34,211,238,.45), transparent 70%), #0b1120}
+.tp-neon i{position:absolute; right:7px; top:9px; width:32px; height:9px; border-radius:5px; background:linear-gradient(90deg,#22d3ee,#d946ef); box-shadow:0 0 9px rgba(217,70,239,.65)}
+.tp-neon b{position:absolute; right:7px; bottom:11px; width:46px; height:6px; border-radius:3px; background:rgba(255,255,255,.9); box-shadow:0 0 9px rgba(160,180,255,.85)}
+.tp-neon u{position:absolute; left:7px; bottom:9px; width:17px; height:17px; border-radius:50%; background:linear-gradient(135deg,#22d3ee,#d946ef); box-shadow:0 0 9px rgba(34,211,238,.6)}
+/* پیش‌نمایش کلاسیک */
+.tp-classic{background:radial-gradient(44px 30px at 50% 0%, rgba(212,175,55,.26), transparent 72%), #070a14; border-color:rgba(212,175,55,.55)}
+.tp-classic i{position:absolute; inset:4px; border:1px solid rgba(212,175,55,.4); border-radius:8px}
+.tp-classic b{position:absolute; top:16px; right:12px; font-family:'Amiri',serif; font-size:19px; font-weight:700; line-height:1.2; background:linear-gradient(180deg,#fff6d0,#e8c75f 48%,#b8902b); -webkit-background-clip:text; background-clip:text; color:transparent}
+.tp-classic u{position:absolute; bottom:11px; right:12px; width:38px; height:5px; border-radius:3px; background:linear-gradient(90deg,#b8902b,#fff1c2); box-shadow:0 0 7px rgba(212,175,55,.5)}
+.tp-classic s{position:absolute; bottom:9px; left:12px; width:14px; height:14px; border-radius:50%; background:radial-gradient(circle at 32% 28%, #fff6d0, #e8c75f 46%, #a47a1c); box-shadow:0 0 8px rgba(212,175,55,.6)}
+/* پیش‌نمایش پاپ */
+.tp-pop{background:radial-gradient(40px 28px at 0% 0%, rgba(106,61,255,.6), transparent 72%), radial-gradient(32px 24px at 100% 72%, rgba(255,61,139,.4), transparent 72%), #0c0c1d}
+.tp-pop i{position:absolute; top:9px; right:8px; width:36px; height:13px; border-radius:8px; background:linear-gradient(120deg,#6a3dff,#ff3d8b,#ff9a3d,#6a3dff); background-size:300% 100%; animation:thFlow 3s linear infinite}
+.tp-pop b{position:absolute; bottom:10px; right:8px; width:30px; height:15px; border-radius:8px; background:#c6ff3d; box-shadow:0 3px 0 #7aa800}
+.tp-pop u{position:absolute; bottom:10px; left:8px; width:15px; height:15px; border-radius:7px; background:#3dd9ff; box-shadow:0 3px 0 #1a8fb0}
+.theme-name{font-size:12px; font-weight:800; color:var(--txt)}
+.theme-name small{display:block; font-size:9.5px; font-weight:600; color:var(--txt3); margin-top:2px}
+.theme-opt .t-lock{position:absolute; top:6px; left:6px; width:21px; height:21px; z-index:3; display:grid; place-items:center; filter:drop-shadow(0 1px 3px rgba(0,0,0,.6))}
+.theme-opt .t-lock svg{width:20px; height:20px}
+.pers-badge{display:inline-flex; align-items:center; gap:5px; font-size:10.5px; font-weight:800; padding:3px 9px; border-radius:99px; background:rgba(251,191,36,.14); color:var(--warn2); border:1px solid rgba(251,191,36,.4)}
