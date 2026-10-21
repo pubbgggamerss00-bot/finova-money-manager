@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.10.1';
+  const APP_VERSION = '1.11.0';
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -252,7 +252,8 @@ const App = (() => {
       const extra = {};
       const known = ['plan', 'type', 'tier', 'name', 'title', 'label', 'valid', 'ok', 'msg', 'message',
         'expiresAt', 'expires_at', 'expiry', 'expires', 'expire', 'validUntil', 'valid_until', 'until', 'endAt', 'end',
-        'days', 'duration', 'durationDays', 'duration_days', 'period', 'months', 'month', 'unlimited', 'data'];
+        'days', 'duration', 'durationDays', 'duration_days', 'period', 'months', 'month', 'unlimited', 'data',
+        'token', 'account', 'used', 'consumed', 'revoked', 'active', 'activatedAt', 'activated_at'];
       for (const k in src) {
         if (known.indexOf(k) >= 0) continue;
         const v = src[k];
@@ -274,18 +275,46 @@ const App = (() => {
     }
     return j;
   }
+  /* فعال‌سازی مرکزی: سرور با ok:true توکن را مصرف‌شده می‌کند و به کد حساب قفل می‌زند */
+  async function apiActivateToken(tok, acc) {
+    const r = await Bridge.http(TOKEN_API + '/activate', 'POST',
+      { 'Content-Type': 'application/json' }, JSON.stringify({ token: tok, account: acc }), 15000);
+    let j = null;
+    try { j = JSON.parse(r.body); } catch (e) {}
+    if (!j || typeof j !== 'object') {
+      if (!r.ok) return { __netFail: true };
+      return { ok: false, msg: 'پاسخ نامعتبر از سرور — کمی بعد دوباره تلاش کن' };
+    }
+    return j;
+  }
   async function activateToken(raw) {
     const tok = cleanToken(raw);
     const dashless = tok.replace(/-/g, '');
     if (dashless.length < 10) return { ok: false, msg: 'توکن را کامل وارد کن — فرمت PXXXX-XXXX-XXXX-XXXX' };
     if ((state.pro.used || []).includes(dashless)) return { ok: false, msg: 'این توکن قبلاً روی این حساب استفاده شده است' };
+    const acc = (state.account && state.account.code) || 'FN-UNKNOWN';
+    /* گام ۱ — فعال‌سازی مرکزی: قبل از هر چیزی سرور تصمیم می‌گیرد.
+       توکن مصرف‌شده / مال حساب دیگر / ثبت نشده → سرور ok:false می‌دهد و هیچ چیزی فعال نمی‌شود */
     let r;
-    try { r = await apiCheckToken(tok); } catch (e) { r = { __netFail: true }; }
+    try { r = await apiActivateToken(tok, acc); } catch (e) { r = { __netFail: true }; }
     if (r && r.__netFail) return { ok: false, net: true, msg: 'اتصال به سرور برقرار نشد — اینترنت را بررسی کن و دوباره تلاش کن' };
-    if (!apiTokenValid(r)) return { ok: false, msg: (r && (r.msg || r.message)) || 'توکن نامعتبر است' };
-    // سرور تأیید کرد — اعتبار دقیقاً بر اساس اطلاعات همین توکن از سرور محاسبه می‌شود
-    const info = extractTokenInfo(r);
+    // دروازه فعال‌سازی: فقط ok === true (یا valid === true در فرمت قدیمی) پرو را روشن می‌کند
+    const activated = !!(r && (r.ok === true || r.valid === true));
+    if (!activated) return { ok: false, msg: (r && (r.msg || r.message)) || 'توکن نامعتبر است یا قبلاً استفاده شده' };
+    /* گام ۲ — سرور تأیید و توکن را مصرف کرد؛ اعتبار دقیقاً بر اساس اطلاعات همین توکن محاسبه می‌شود */
+    let info = extractTokenInfo(r);
+    if (info.days == null && !info.unlimited && !info.expiresAt) {
+      // پاسخ activate مدت را نداشت → بهترین تلاش: گرفتن جزئیات توکن از /check
+      try {
+        const c = await apiCheckToken(tok);
+        if (c && !c.__netFail && (c.ok === true || c.valid === true)) {
+          const ci = extractTokenInfo(c);
+          if (ci.days != null || ci.unlimited || ci.expiresAt) info = Object.assign(info, ci);
+        }
+      } catch (e) {}
+    }
     info.at = Date.now();
+    info.account = acc;
     const base = Math.max(Date.now(), state.pro.expiresAt || 0);
     // طبق قرارداد سرور: unlimited یا days === 0 → نامحدود | وگرنه days روز | یا انقضای مطلق | پیش‌فرض ۳۰ روز
     const unlimited = !!(info.unlimited || info.days === 0);
@@ -318,12 +347,13 @@ const App = (() => {
     const row = (lbl, val) => `<div class="toki-row"><span class="toki-l">${lbl}</span><span class="toki-v">${val}</span></div>`;
     let h = '';
     if (info.plan) h += row('نوع توکن', esc(info.plan));
+    if (info.account) h += row('قفل‌شده به حساب', esc(info.account));
     h += row('تاریخ فعال‌سازی', jTsLabel(info.at || Date.now()));
     h += row('انقضای اشتراک', proUnlimited() ? 'نامحدود ♾️' : jTsLabel(state.pro.expiresAt));
     if (info.days) h += row('مدت اعتبار توکن', faDigits(info.days) + ' روز');
     else if (info.unlimited) h += row('مدت اعتبار توکن', 'نامحدود ♾️');
     if (info.extra) for (const k in info.extra) h += row(esc(k), esc(info.extra[k]));
-    h += row('منبع تأیید', 'سرور فینوا ✅');
+    h += row('منبع تأیید', 'سرور فینوا — فعال‌سازی مرکزی ✅');
     return h;
   }
   function copyText(s) {
@@ -578,7 +608,7 @@ const App = (() => {
       <div class="acc-code-row"><div><div class="acc-code-lbl">کد حساب تو</div><div class="acc-code-val">${esc(state.account ? state.account.code : '—')}</div></div><button class="copy-code-btn" id="copyAccBtn2">📋 کپی</button></div>
       <div style="height:12px"></div>
       <input id="tokInp" class="tok-input" placeholder="PXXXX-XXXX-XXXX-XXXX" maxlength="24" autocomplete="off">
-      <p class="tok-hint">توکن آنلاین از سرور فینوا بررسی می‌شود • اعتبار بر اساس اطلاعات سرور همان توکن محاسبه و روی هم جمع می‌شود • توکن یک‌بارمصرف است</p>
+      <p class="tok-hint">توکن آنلاین از سرور فینوا فعال می‌شود و همان لحظه مصرف شده و به کد حساب تو قفل می‌زند • اعتبار بر اساس اطلاعات سرور همان توکن محاسبه و روی هم جمع می‌شود • توکن یک‌بارمصرف است</p>
       <p id="tokErr" style="font-size:11.5px;color:var(--bad2);font-weight:700;min-height:16px;margin:4px 0 0"></p>
       <div class="btn-row"><button class="btn full" id="tokGoBtn">فعال‌سازی پرو ✨</button><button class="btn ghost" id="tokXBtn">بستن</button></div>`);
     const inp = m.querySelector('#tokInp');
@@ -590,7 +620,7 @@ const App = (() => {
       const err = m.querySelector('#tokErr');
       const go = m.querySelector('#tokGoBtn');
       if (!v) { err.textContent = 'توکن را وارد کن'; return; }
-      go.disabled = true; go.textContent = '⏳ در حال بررسی از سرور…';
+      go.disabled = true; go.textContent = '⏳ در حال فعال‌سازی از سرور…';
       err.textContent = '';
       const r = await activateToken(v);
       go.disabled = false; go.textContent = 'فعال‌سازی پرو ✨';
@@ -618,10 +648,10 @@ const App = (() => {
         <div class="toki-hero">
           <div class="toki-ico">🎉</div>
           <div class="toki-title">اشتراک پرو فعال شد!</div>
-          <div class="toki-sub">توکن آنلاین از سرور فینوا تأیید شد</div>
+          <div class="toki-sub">توکن آنلاین از سرور فینوا تأیید و مصرف شد</div>
         </div>
         <div class="toki-card">${tokenInfoRows(info)}</div>
-        <p class="toki-hint">همه اطلاعات این توکن از سرور فینوا دریافت و روی این حساب ثبت شد • اعتبار با توکن‌های بعدی روی هم جمع می‌شود</p>
+        <p class="toki-hint">همه اطلاعات این توکن از سرور فینوا دریافت و روی این حساب ثبت شد • این توکن مصرف شده و فقط روی همین حساب کار می‌کند • اعتبار با توکن‌های بعدی روی هم جمع می‌شود</p>
         <div class="btn-row"><button class="btn full" id="tokiOkBtn">عالیه! 🌟</button></div>
       </div>`);
     m.querySelector('#tokiOkBtn').onclick = () => m.remove();
