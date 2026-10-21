@@ -802,3 +802,38 @@ body[data-theme="pop"] .font-opt.on::after{color:#0c0c1d}
 .font-flash{position:fixed; inset:0; z-index:99998; pointer-events:none; display:grid; place-items:center; padding:20px}
 .font-flash-pill{font-size:19px; font-weight:900; color:#fff; background:rgba(8,12,24,.9); border:1.5px solid var(--pri); padding:14px 24px; border-radius:18px; box-shadow:var(--glow),0 14px 44px rgba(0,0,0,.55); animation:fontPop 1.2s cubic-bezier(.2,1.25,.3,1) forwards}
 @keyframes fontPop{0%{opacity:0; transform:scale(.62) translateY(14px)}16%{opacity:1; transform:scale(1.05)}28%{transform:scale(1)}76%{opacity:1; transform:scale(1)}100%{opacity:0; transform:scale(.93) translateY(-10px)}}
+
+/* ═══ بنر تبریک «پرو فعال شد» — سه نسخه تم کلاسیک/نئون/پاپ (r20) ═══ */
+.pab{position:relative; width:100%; max-width:390px; height:132px; margin:16px auto 2px; box-sizing:border-box; overflow:hidden; direction:rtl}
+.pab,.pab *{box-sizing:border-box}
+/* — کلاسیک — */
+@keyframes pabUnveil{0%{opacity:0;transform:scale(.94);clip-path:inset(0 50% 0 50% round 18px)}100%{opacity:1;transform:none;clip-path:inset(0 0 0 0 round 18px)}}
+@keyframes pabSpinPlain{to{transform:rotate(360deg)}}
+@keyframes pabSpinCenter{to{transform:translate(-50%,-50%) rotate(360deg)}}
+@keyframes pabFoil{0%{background-position:0% 50%}100%{background-position:200% 50%}}
+@keyframes pabSweep{0%{transform:translateX(-200%) skewX(-22deg)}55%,100%{transform:translateX(700%) skewX(-22deg)}}
+@keyframes pabDust{0%{transform:translateY(0) translateX(0) scale(.6);opacity:0}20%{opacity:1}100%{transform:translateY(-140px) translateX(14px) scale(1.1);opacity:0}}
+@keyframes pabDmPulse{0%,100%{transform:rotate(45deg) scale(1);filter:brightness(1)}50%{transform:rotate(45deg) scale(1.45);filter:brightness(1.4)}}
+@keyframes pabCrownBobA{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes pabDraw{0%,8%{stroke-dashoffset:30}30%,88%{stroke-dashoffset:0}100%{stroke-dashoffset:30}}
+@keyframes pabSealGlow{0%,100%{box-shadow:0 0 12px rgba(61,189,143,.45),0 6px 14px rgba(0,0,0,.5)}50%{box-shadow:0 0 24px rgba(95,217,173,.8),0 6px 14px rgba(0,0,0,.5)}}
+@keyframes pabLineGrow{0%{transform:scaleX(0)}100%{transform:scaleX(1)}}
+@keyframes pabGlowGold{0%,100%{box-shadow:0 0 18px rgba(212,175,55,.25),0 14px 30px rgba(0,0,0,.55)}50%{box-shadow:0 0 34px rgba(244,220,138,.55),0 14px 30px rgba(0,0,0,.55)}}
+/* — نئون — */
+@keyframes pabPowerOn{0%{opacity:0;transform:scale(.92)}8%{opacity:1}12%{opacity:.2}18%{opacity:1}24%{opacity:.4}32%,100%{opacity:1;transform:none}}
+@keyframes pabBoxGlow{0%,100%{box-shadow:0 0 14px rgba(34,211,238,.45),0 0 40px rgba(139,92,246,.35),0 0 80px rgba(236,72,153,.2)}50%{box-shadow:0 0 22px rgba(34,211,238,.75),0 0 58px rgba(139,92,246,.6),0 0 110px rgba(236,72,153,.38)}}
+@keyframes pabFlicker{0%,18%,22%,62%,64%,100%{opacity:1}20%,63%{opacity:.45}21%{opacity:.9}}
+@keyframes pabRise{0%{transform:translateY(0) scale(1);opacity:0}15%{opacity:1}100%{transform:translateY(-150px) scale(.4);opacity:0}}
+@keyframes pabScan{0%{transform:translateY(-30px)}100%{transform:translateY(190px)}}
+@keyframes pabRing{0%{transform:scale(1);opacity:.8}100%{transform:scale(1.8);opacity:0}}
+@keyframes pabCrownGlow{0%,100%{filter:drop-shadow(0 0 4px #22d3ee) drop-shadow(0 0 10px #8b5cf6)}50%{filter:drop-shadow(0 0 7px #67e8f9) drop-shadow(0 0 18px #c084fc)}}
+@keyframes pabOkPulse{0%,100%{box-shadow:0 0 10px #34e0a1,0 0 24px rgba(52,224,161,.5),inset 0 0 10px rgba(52,224,161,.4)}50%{box-shadow:0 0 16px #6dffc6,0 0 40px rgba(52,224,161,.8),inset 0 0 16px rgba(52,224,161,.6)}}
+/* — پاپ — */
+@keyframes pabPopIn{0%{opacity:0;transform:scale(.7) translateY(30px)}100%{opacity:1;transform:none}}
+@keyframes pabSheen{0%{background-position:0% 50%}100%{background-position:200% 50%}}
+@keyframes pabFall{0%{transform:translateY(-24px) rotate(0deg);opacity:0}12%{opacity:1}100%{transform:translateY(160px) rotate(560deg);opacity:0}}
+@keyframes pabCrownBobB{0%,100%{transform:translateY(0) rotate(-4deg)}50%{transform:translateY(-4px) rotate(4deg)}}
+@keyframes pabRipple{0%{transform:scale(1);opacity:.75}100%{transform:scale(1.9);opacity:0}}
+@keyframes pabTwinkle{0%,100%{opacity:0;transform:scale(.2) rotate(0deg)}50%{opacity:1;transform:scale(1) rotate(90deg)}}
+@keyframes pabLive{0%,100%{box-shadow:0 0 0 0 rgba(61,255,160,.7)}50%{box-shadow:0 0 0 7px rgba(61,255,160,0)}}
+@keyframes pabGlowWarm{0%,100%{box-shadow:0 0 18px rgba(255,200,60,.35),0 14px 30px rgba(0,0,0,.5)}50%{box-shadow:0 0 34px rgba(255,200,60,.65),0 14px 30px rgba(0,0,0,.5)}}

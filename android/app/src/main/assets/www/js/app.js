@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.8.0';
+  const APP_VERSION = '1.9.0';
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -970,7 +970,7 @@ const App = (() => {
     ${!proExpiresAt() ? `
     <button class="pro-cta" id="proCta" aria-label="ارتقا به نسخه پرو — ${faDigits(PRO_FEATURES.length)} قابلیت فعال می‌شود">
       <img class="pro-cta-img" src="img/pro-upgrade.png" alt="ارتقا به نسخه پرو — دسترسی نامحدود به همه امکانات ویژه">
-    </button>` : `<div class="pro-active-strip">⭐ اشتراک پرو فعال است${proExpiresAt() ? ' تا ' + jTsLabel(proExpiresAt()) : ''} — همه قابلیت‌ها آزادند ✨</div>`}`;
+    </button>` : proActiveBanner()}`;
   }
 
   /* ── تراکنش‌ها ── */
@@ -1891,6 +1891,114 @@ const App = (() => {
     await saveState();
     UI.toast(`فونت «${FONTS[f].name}» فعال شد ✒️`, 'ok');
     if (curTab === 'settings') render('settings');
+  }
+  /* ── بنر تبریک «پرو فعال شد» — سه نسخه مطابق موکاپ‌های کاربر: کلاسیک طلایی / نئون / پاپ مدرن (r20) ── */
+  function proActiveBanner() {
+    const pe = proExpiresAt();
+    const sub = 'از همه امکانات ویژه لذت ببر' + (pe ? ' • فعال تا ' + jTsLabel(pe) : '');
+    const th = THEMES[state.theme] ? state.theme : 'neon';
+    const CROWN = 'M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z';
+    const CHECK = 'M5 12.5l4.5 4.5L19 7.5';
+    const STAR = 'M12 0l2.6 9.4L24 12l-9.4 2.6L12 24l-2.6-9.4L0 12l9.4-2.6z';
+    const checkSvg = (size, stroke, sw, glow) => `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"${glow ? ` style="filter:drop-shadow(0 0 5px ${glow})"` : ''}><path d="${CHECK}" stroke-dasharray="30" stroke-dashoffset="30" style="animation:pabDraw 4s ease-in-out infinite"></path></svg>`;
+    if (th === 'classic') {
+      const dust = [[10,3,'#fff1c2',6,3.8,0],[22,2,'#e8c75f',6,4.4,1],[34,4,'#fff1c2',8,4,2],[46,2,'#e8c75f',6,3.6,.5],[58,3,'#fff1c2',6,4.6,1.6],[70,4,'#f4dc8a',8,3.9,2.7],[82,2,'#fff1c2',6,4.2,.8],[92,3,'#e8c75f',6,4,3.2]];
+      return `<div class="pab" role="status" aria-label="اشتراک پرو فعال است" style="border-radius:18px; animation:pabUnveil 1.2s cubic-bezier(.2,.9,.3,1) both, pabGlowGold 3.6s ease-in-out 1.2s infinite">
+  <div style="position:absolute; inset:0; border-radius:18px; padding:2px; background:linear-gradient(135deg,#fff1c2 0%,#b8902b 30%,#6e5216 52%,#e6c25a 78%,#fff1c2 100%)">
+    <div style="position:relative; width:100%; height:100%; border-radius:16px; overflow:hidden; background:linear-gradient(135deg,#1a1336 0%,#0f1a32 62%,#0a1424 100%)">
+      <div style="position:absolute; inset:5px; border:1px solid rgba(212,175,55,.38); border-radius:12px"></div>
+      <div style="position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none">${dust.map(d => `<div style="position:absolute; bottom:-4px; left:${d[0]}%; width:${d[1]}px; height:${d[1]}px; border-radius:50%; background:${d[2]}; box-shadow:0 0 ${d[3]}px #e8c75f; animation:pabDust ${d[4]}s ease-out ${d[5]}s infinite"></div>`).join('')}</div>
+      <div style="position:absolute; top:0; bottom:0; left:0; width:50px; background:linear-gradient(90deg, rgba(255,241,194,0), rgba(255,241,194,.2), rgba(255,241,194,0)); animation:pabSweep 5s ease-in-out infinite 1.4s"></div>
+      <div style="position:absolute; top:2px; left:50%; width:8px; height:8px; margin-left:-4px; background:linear-gradient(135deg,#fff1c2,#b8902b); animation:pabDmPulse 2.4s ease-in-out infinite"></div>
+      <div style="position:absolute; bottom:2px; left:50%; width:8px; height:8px; margin-left:-4px; background:linear-gradient(135deg,#fff1c2,#b8902b); animation:pabDmPulse 2.4s ease-in-out 1.2s infinite"></div>
+      <div style="position:relative; width:100%; height:100%; padding:0 20px; display:flex; flex-direction:row; align-items:center; gap:14px">
+        <div style="position:relative; flex:none; width:78px; height:78px; display:flex; align-items:center; justify-content:center">
+          <div style="position:absolute; left:50%; top:50%; width:120px; height:120px; margin:-60px 0 0 -60px; border-radius:50%; background:repeating-conic-gradient(from 0deg, rgba(232,199,95,.4) 0deg 3deg, rgba(232,199,95,0) 3deg 15deg); -webkit-mask-image:radial-gradient(circle, transparent 28%, #000 40%, transparent 72%); mask-image:radial-gradient(circle, transparent 28%, #000 40%, transparent 72%); animation:pabSpinPlain 24s linear infinite"></div>
+          <div style="position:absolute; inset:7px; border-radius:50%; padding:2px; background:linear-gradient(135deg,#fff1c2,#b8902b 48%,#6e5216 62%,#e6c25a)">
+            <div style="width:100%; height:100%; border-radius:50%; background:radial-gradient(circle at 35% 30%, #232a4c, #0a0e1a); box-shadow:inset 0 0 0 3px #0a0e1a, inset 0 0 0 4px rgba(212,175,55,.5)"></div>
+          </div>
+          <svg aria-hidden="true" width="32" height="32" viewBox="0 0 24 24" style="position:relative; animation:pabCrownBobA 2.8s ease-in-out infinite; filter:drop-shadow(0 0 6px rgba(232,199,95,.7))"><path d="${CROWN}" fill="url(#pabGoldC)"></path><path d="M5.5 19h13" stroke="#fff1c2" stroke-width="1.6" stroke-linecap="round"></path></svg>
+        </div>
+        <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:2px">
+          <div style="font-size:11px; font-weight:800; letter-spacing:.32em; color:#d8c58a">PRO · MEMBER</div>
+          <div style="font-family:'Amiri','Vazirmatn',serif; font-size:25px; font-weight:700; line-height:1.35; background:linear-gradient(100deg,#fff6d0 0%,#e8c75f 28%,#b8902b 46%,#fff6d0 62%,#e8c75f 82%,#fff6d0 100%); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent; animation:pabFoil 4s linear infinite">تبریک! پرو فعال شد</div>
+          <div style="width:100%; height:1px; transform-origin:right; background:linear-gradient(270deg, rgba(212,175,55,.7), rgba(212,175,55,0)); animation:pabLineGrow 1.4s ease-out .8s both"></div>
+          <div style="font-size:12.5px; font-weight:400; line-height:1.6; color:#c9bd9a; margin-top:1px">${sub}</div>
+        </div>
+        <div style="flex:none; display:flex; flex-direction:column; align-items:center; gap:7px">
+          <div style="width:48px; height:48px; padding:2px; border-radius:50%; background:linear-gradient(135deg,#fff1c2,#b8902b 50%,#6e5216); animation:pabSealGlow 2.6s ease-in-out infinite">
+            <div style="width:100%; height:100%; border-radius:50%; background:radial-gradient(circle at 35% 30%, #1f7a5a, #0b3a2b); box-shadow:inset 0 0 0 3px #0b3a2b, inset 0 0 0 4px rgba(212,175,55,.5); display:flex; align-items:center; justify-content:center">${checkSvg(24, '#fff1c2', 3)}</div>
+          </div>
+          <span style="font-family:'Amiri','Vazirmatn',serif; font-size:16px; font-weight:700; color:#5fd9ad">فعال</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="pabGoldC" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff6d0"></stop><stop offset=".5" stop-color="#e8c75f"></stop><stop offset="1" stop-color="#a47a1c"></stop></linearGradient></defs></svg>
+</div>`;
+    }
+    if (th === 'pop') {
+      const conf = [[8,7,11,2,'#ffe53d',3.4,0],[17,8,8,50,'#ff3d8b',4,.9],[27,6,12,2,'#3dd9ff',3.2,1.7],[36,8,8,2,'#c6ff3d',3.8,.4],[45,7,11,2,'#ff9a3d',3.6,2.2],[54,8,8,50,'#a98bff',4.2,1.2],[63,6,12,2,'#ffe53d',3.3,2.8],[72,8,8,2,'#ff3d8b',3.9,.2],[81,7,11,2,'#3dd9ff',3.5,1.5],[90,8,8,50,'#c6ff3d',4.1,2.5],[22,6,10,2,'#ff9a3d',3.7,3.1],[68,8,8,50,'#ffe53d',3.9,3.4]];
+      return `<div class="pab" role="status" aria-label="اشتراک پرو فعال است" style="border-radius:30px; animation:pabPopIn .9s cubic-bezier(.2,1.3,.3,1) both, pabGlowWarm 3.2s ease-in-out 1s infinite">
+  <div style="position:absolute; top:50%; left:50%; width:520px; height:520px; transform:translate(-50%,-50%); background:conic-gradient(from 0deg, #ffe53d, #ff9a3d, #ff3d8b, #6a3dff, #3dd9ff, #c6ff3d, #ffe53d); animation:pabSpinCenter 5s linear infinite"></div>
+  <div style="position:absolute; inset:3px; border-radius:27px; overflow:hidden; background:linear-gradient(135deg,#1b1538 0%,#14122e 55%,#231133 100%)">
+    <div style="position:absolute; right:-30px; top:-50px; width:190px; height:190px; border-radius:50%; background:radial-gradient(circle, rgba(255,200,60,.32), rgba(255,200,60,0) 66%)"></div>
+    <div style="position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none">${conf.map(c => `<div style="position:absolute; top:0; left:${c[0]}%; width:${c[1]}px; height:${c[2]}px; border-radius:${c[3] === 50 ? '50%' : '2px'}; background:${c[4]}; animation:pabFall ${c[5]}s linear ${c[6]}s infinite"></div>`).join('')}</div>
+    <div style="position:absolute; top:0; bottom:0; left:0; width:46px; background:linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.18), rgba(255,255,255,0)); animation:pabSweep 4.5s ease-in-out infinite 1s"></div>
+    <div style="position:relative; width:100%; height:100%; padding:0 18px; display:flex; flex-direction:row; align-items:center; gap:14px">
+      <div style="position:relative; flex:none; width:76px; height:76px; display:flex; align-items:center; justify-content:center">
+        <div style="position:absolute; inset:6px; border-radius:50%; border:2px solid #ffd24a; animation:pabRipple 2.4s ease-out infinite"></div>
+        <div style="position:absolute; inset:6px; border-radius:50%; border:2px solid #ff9a3d; animation:pabRipple 2.4s ease-out 1.2s infinite"></div>
+        <div style="position:absolute; inset:4px; border-radius:50%; background:conic-gradient(from 0deg, #fff6d0, #ffb020, #fff6d0, #c77a00, #fff6d0); animation:pabSpinPlain 6s linear infinite"></div>
+        <div style="position:absolute; inset:8px; border-radius:50%; background:radial-gradient(circle at 32% 26%, #2b2150, #120f2a); box-shadow:inset 0 0 14px rgba(255,200,60,.35)"></div>
+        <svg aria-hidden="true" width="36" height="36" viewBox="0 0 24 24" style="position:relative; animation:pabCrownBobB 2.6s ease-in-out infinite; filter:drop-shadow(0 0 7px rgba(255,200,60,.85))"><path d="${CROWN}" fill="url(#pabGoldP)"></path><path d="M5.5 19h13" stroke="#fff0b0" stroke-width="1.6" stroke-linecap="round"></path></svg>
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" style="position:absolute; top:0; right:2px; animation:pabTwinkle 2.2s ease-in-out infinite"><path d="${STAR}" fill="#fff6d0"></path></svg>
+        <svg aria-hidden="true" width="10" height="10" viewBox="0 0 24 24" style="position:absolute; bottom:4px; left:0; animation:pabTwinkle 2.2s ease-in-out .8s infinite"><path d="${STAR}" fill="#3dd9ff"></path></svg>
+        <svg aria-hidden="true" width="9" height="9" viewBox="0 0 24 24" style="position:absolute; top:8px; left:2px; animation:pabTwinkle 2.2s ease-in-out 1.5s infinite"><path d="${STAR}" fill="#ff7ab0"></path></svg>
+      </div>
+      <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:3px">
+        <div style="font-size:11.5px; font-weight:800; letter-spacing:.22em; color:#ffb020; text-shadow:0 0 8px rgba(255,176,32,.7)">PRO · PREMIUM</div>
+        <div style="font-size:21px; font-weight:900; line-height:1.35; background:linear-gradient(100deg,#fff6d0 0%,#ffd24a 25%,#ff9a3d 45%,#ffffff 60%,#ffd24a 80%,#fff6d0 100%); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent; animation:pabSheen 3.5s linear infinite">تبریک! پرو فعال شد</div>
+        <div style="font-size:12.5px; font-weight:400; line-height:1.6; color:#c9c5e8">${sub}</div>
+      </div>
+      <div style="flex:none; display:flex; flex-direction:column; align-items:center; gap:7px">
+        <div style="width:46px; height:46px; border-radius:50%; background:linear-gradient(135deg,#c6ff3d,#3dffa0); box-shadow:0 5px 0 #1a9a5a; display:flex; align-items:center; justify-content:center; animation:pabLive 2s ease-out infinite">${checkSvg(26, '#06281a', 3.4)}</div>
+        <span style="font-size:11.5px; font-weight:900; color:#7dffc0">فعال</span>
+      </div>
+    </div>
+  </div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="pabGoldP" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff6d0"></stop><stop offset=".5" stop-color="#ffd24a"></stop><stop offset="1" stop-color="#d98a00"></stop></linearGradient></defs></svg>
+</div>`;
+    }
+    const rise = [[12,4,'#67e8f9','#22d3ee',8,3.2,0],[24,3,'#f0abfc','#ec4899',8,3.8,1.1],[36,5,'#c4b5fd','#8b5cf6',10,4,.5],[47,3,'#67e8f9','#22d3ee',8,3.4,2],[58,4,'#f0abfc','#ec4899',8,3.9,.8],[69,3,'#6dffc6','#34e0a1',8,3.6,1.7],[80,5,'#67e8f9','#22d3ee',10,4.2,2.6],[90,4,'#c4b5fd','#8b5cf6',8,3.5,.3]];
+    return `<div class="pab" role="status" aria-label="اشتراک پرو فعال است" style="border-radius:28px; animation:pabPowerOn 1.6s ease-out both, pabBoxGlow 3s ease-in-out 1.6s infinite">
+  <div style="position:absolute; top:50%; left:50%; width:520px; height:520px; transform:translate(-50%,-50%); background:conic-gradient(from 0deg, rgba(34,211,238,0) 0%, rgba(34,211,238,0) 48%, #22d3ee 62%, #8b5cf6 76%, #ec4899 88%, rgba(236,72,153,0) 100%); animation:pabSpinCenter 3.4s linear infinite"></div>
+  <div style="position:absolute; inset:0; border:1.5px solid rgba(34,211,238,.35); border-radius:28px"></div>
+  <div style="position:absolute; inset:2.5px; border-radius:25.5px; overflow:hidden; background:linear-gradient(135deg,#0d1432 0%,#0a1026 60%,#150f33 100%)">
+    <div style="position:absolute; left:-50px; bottom:-70px; width:220px; height:220px; border-radius:50%; background:radial-gradient(circle, rgba(34,211,238,.26), rgba(34,211,238,0) 66%)"></div>
+    <div style="position:absolute; right:-40px; top:-70px; width:220px; height:220px; border-radius:50%; background:radial-gradient(circle, rgba(139,92,246,.34), rgba(139,92,246,0) 66%)"></div>
+    <div style="position:absolute; left:0; right:0; top:0; height:26px; background:linear-gradient(180deg, rgba(34,211,238,0), rgba(34,211,238,.14), rgba(34,211,238,0)); animation:pabScan 3.6s linear infinite"></div>
+    <div style="position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none">${rise.map(p => `<div style="position:absolute; bottom:-6px; left:${p[0]}%; width:${p[1]}px; height:${p[1]}px; border-radius:50%; background:${p[2]}; box-shadow:0 0 ${p[4]}px ${p[3]}; animation:pabRise ${p[5]}s ease-out ${p[6]}s infinite"></div>`).join('')}</div>
+    <div style="position:relative; width:100%; height:100%; padding:0 18px; display:flex; flex-direction:row; align-items:center; gap:14px">
+      <div style="position:relative; flex:none; width:74px; height:74px; display:flex; align-items:center; justify-content:center">
+        <div style="position:absolute; inset:5px; border-radius:50%; border:2px solid #22d3ee; animation:pabRing 2.4s ease-out infinite"></div>
+        <div style="position:absolute; inset:5px; border-radius:50%; border:2px solid #c084fc; animation:pabRing 2.4s ease-out 1.2s infinite"></div>
+        <div style="position:absolute; inset:2px; border-radius:50%; border:2px dashed rgba(103,232,249,.65); animation:pabSpinPlain 10s linear infinite"></div>
+        <div style="position:absolute; inset:9px; border-radius:50%; border:2px solid #67e8f9; background:radial-gradient(circle, rgba(34,211,238,.24), rgba(10,16,38,.9) 72%); box-shadow:0 0 14px #22d3ee, inset 0 0 14px rgba(34,211,238,.5)"></div>
+        <svg aria-hidden="true" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#e0fbff" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round" style="position:relative; animation:pabCrownGlow 2.4s ease-in-out infinite"><path d="${CROWN}"></path><path d="M5.5 19h13"></path></svg>
+      </div>
+      <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:3px">
+        <div style="font-size:11.5px; font-weight:800; letter-spacing:.3em; color:#c084fc; text-shadow:0 0 8px rgba(192,132,252,.9); animation:pabFlicker 5s linear infinite 1.8s">PRO ACTIVE</div>
+        <div style="font-size:21px; font-weight:900; line-height:1.35; color:#ecfeff; text-shadow:0 0 5px #22d3ee, 0 0 14px #22d3ee, 0 0 30px #8b5cf6; animation:pabFlicker 6s linear infinite 2.4s">تبریک! پرو فعال شد</div>
+        <div style="font-size:12.5px; font-weight:400; line-height:1.6; color:#b8c3ef">${sub}</div>
+      </div>
+      <div style="flex:none; display:flex; flex-direction:column; align-items:center; gap:7px">
+        <div style="width:46px; height:46px; border-radius:50%; border:2px solid #6dffc6; background:rgba(52,224,161,.12); display:flex; align-items:center; justify-content:center; animation:pabOkPulse 2s ease-in-out infinite">${checkSvg(26, '#a8ffdb', 3, '#34e0a1')}</div>
+        <span style="font-size:11.5px; font-weight:900; color:#6dffc6; text-shadow:0 0 8px rgba(52,224,161,.9)">فعال</span>
+      </div>
+    </div>
+  </div>
+</div>`;
   }
   function viewClickHandler(e) {
     const t = e.target;
