@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.5.0';
+  const APP_VERSION = '1.6.0';
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -71,8 +71,34 @@ const App = (() => {
     try { const vEl = document.getElementById('spVer'); if (vEl) vEl.textContent = 'نسخه ' + faDigits(APP_VERSION).replace('.', '٫'); } catch (e) {}
     try { Splash.done(); } catch (e) {}
 
-    // ثبت‌نام — هر کاربر حساب شخصی خودش را دارد؛ بدون حساب، صفحه ثبت‌نام نشان داده می‌شود
-    if (!state.account || !state.account.code) { showAuth(); return; }
+    /* ═══ v1.6.0 — نشست کاربر: مهاجرت کاربران ۱.۵ + ورود خودکار با نشست معتبر ═══ */
+    let regs = getRegistry();
+    let sessCode = getSession();
+    if (!regs.length && state.account && state.account.code) {
+      // مهاجرت از نسخه ۱.۵: حساب موجود → رجیستری + نشست خودکار (کاربر متوجه چیزی نمی‌شود)
+      regs.push({
+        code: state.account.code, name: state.account.name, nameLower: String(state.account.name || '').toLowerCase(),
+        salt: state.account.salt || '', passHash: state.account.passHash || '', createdAt: state.account.createdAt || Date.now(), logoutUsed: 0,
+      });
+      setRegistry(regs);
+      sessCode = state.account.code; setSession(sessCode);
+    }
+    if (sessCode) {
+      const me = regs.find(r => r.code === sessCode);
+      if (!me) { sessCode = ''; setSession(''); }
+      else if (!state.account || state.account.code !== sessCode) {
+        // نشست معتبر است ولی داده‌ی استورها مال حساب دیگری است (مثلاً پاک‌شدن localStorage)
+        // → داده‌های همان حساب از سندیک بازیابی می‌شود تا داده‌ی کاربران قاطی نشود
+        await loadAccSession(me, false);
+        categories = (await Store.all('categories')) || [];
+        wallets = (await Store.all('wallets')) || [];
+      }
+    }
+    // سندیک داده حساب — اگر نشست هست ولی سندیک قدیمی‌تر از استورهاست، سندیک تازه می‌شود
+    if (!sessCode || !state.account || !state.account.code) { showAuth(); return; }
+    await saveAccBlob();
+    setInterval(() => { try { if (unlocked) saveAccBlob(); } catch (e) {} }, 90000);   // سندیک دوره‌ای
+    window.addEventListener('pagehide', () => { try { saveAccBlob(); } catch (e) {} });
     // قفل
     if (state.lock && state.lock.enabled) { showLock(); } else { unlocked = true; afterUnlock(); }
   }
@@ -95,7 +121,14 @@ const App = (() => {
       seedDone: false, notifShown: {},
     };
   }
-  async function saveState() { state.notifShown = state.notifShown || {}; await Store.put('kv', state, 'settings'); }
+  async function saveState() { state.notifShown = state.notifShown || {}; await Store.put('kv', state, 'settings'); markBlobDirty(); }
+  /* — سندیک تاخیری: هر تغییر داده، سندیک حساب را ۴ ثانیه بعد تازه می‌کند
+     (چون در اندروید هنگام کشتن پروسه، رویداد pagehide اجرا نمی‌شود) — */
+  let blobTimer = null;
+  function markBlobDirty() {
+    if (!state.account || !state.account.code || blobTimer) return;
+    blobTimer = setTimeout(() => { blobTimer = null; try { saveAccBlob(); } catch (e) {} }, 4000);
+  }
 
   /* ═══════════ حساب کاربری، اشتراک پرو، توکن و کوارتا ═══════════ */
   const LIC_DAY = 864e5;
@@ -125,8 +158,8 @@ const App = (() => {
     return 'FN-' + Array.from(buf, b => TOK_ALPHA[b % TOK_ALPHA.length]).join('');
   }
   function isPro() {
-    if (state.pro && state.pro.expiresAt > Date.now()) return true;
-    return !!(state.trialStart && Date.now() < state.trialStart + LIC_DAY);
+    // ⚠ دوره تست ۲۴ ساعته فقط قابلیت‌های رایگان دارد (نه پرو) — فقط اشتراک واقعی پرو را باز می‌کند
+    return !!(state.pro && state.pro.expiresAt > Date.now());
   }
   function proExpiresAt() { return state.pro && state.pro.expiresAt > Date.now() ? state.pro.expiresAt : 0; }
   function trialLeftMs() { return state.trialStart ? Math.max(0, state.trialStart + LIC_DAY - Date.now()) : 0; }
@@ -192,6 +225,11 @@ const App = (() => {
     state.pro.used = (state.pro.used || []).concat([tok]);
     state.pro.lastActivated = Date.now();
     await saveState();
+    // سندیک اشتراک در رجیستری گوشی هم ثبت می‌شود (ایمنی بیشتر برای بازیابی حساب)
+    try {
+      const regs = getRegistry(); const me = regs.find(r => r.code === (state.account && state.account.code));
+      if (me) { me.proSnapshot = state.pro; me.trialStart = state.trialStart || 0; me.quotaSnapshot = state.quota; setRegistry(regs); }
+    } catch (e) {}
     removeTrialTimer();
     return { ok: true };
   }
@@ -202,29 +240,99 @@ const App = (() => {
     }
     UI.toast('کپی شد ✅', 'ok');
   }
-  /* — صفحه ثبت‌نام اولین ورود — */
+  /* ═══ v1.6.0 — رجیستری حساب‌ها، نشست و سندیک داده هر حساب (localStorage + kv-blob) ═══ */
+  const REG_KEY = 'finova_accounts_v1', SESS_KEY = 'finova_session', LLOG_KEY = 'finova_logout_log';
+  function getRegistry() { try { const r = JSON.parse(localStorage.getItem(REG_KEY) || '[]'); return Array.isArray(r) ? r : []; } catch (e) { return []; } }
+  function setRegistry(r) { try { localStorage.setItem(REG_KEY, JSON.stringify(r)); } catch (e) {} }
+  function getSession() { try { return localStorage.getItem(SESS_KEY) || ''; } catch (e) { return ''; } }
+  function setSession(code) { try { code ? localStorage.setItem(SESS_KEY, code) : localStorage.removeItem(SESS_KEY); } catch (e) {} }
+  function getLogoutLog() { try { const r = JSON.parse(localStorage.getItem(LLOG_KEY) || '[]'); return Array.isArray(r) ? r : []; } catch (e) { return []; } }
+  function saveLogoutLog(l) { try { localStorage.setItem(LLOG_KEY, JSON.stringify(l)); } catch (e) {} }
+  function accDataKey(code) { return 'accdata:' + code; }
+  /* — سندیک کامل داده‌های حساب فعلی در kv — برای جداسازی داده‌ی هر حساب کاربری — */
+  async function saveAccBlob() {
+    if (!state.account || !state.account.code) return;
+    try {
+      await Store.put('kv', {
+        state: JSON.parse(JSON.stringify(state)), txs, rules, budgets, goals, wallets, categories,
+        savedAt: Date.now(),
+      }, accDataKey(state.account.code));
+    } catch (e) { console.warn('accblob save fail', e); }
+  }
+  /* — بازگرداندن داده‌های یک حساب از سندیک (یا شروع تازه) + همگام‌سازی حافظه — */
+  async function loadAccSession(reg, fresh) {
+    const blob = fresh ? null : await Store.get('kv', accDataKey(reg.code));
+    if (blob && blob.state && blob.state.account) {
+      // پاک‌سازی استورها و بازگردانی کامل از سندیک
+      for (const s of ['transactions', 'rules', 'budgets', 'goals', 'wallets', 'categories']) { try { await Store.clear(s); } catch (e) {} }
+      txs = (blob.txs || []).map(normTx); rules = (blob.rules || []).map(normRule);
+      budgets = blob.budgets || []; goals = (blob.goals || []).map(normGoal);
+      wallets = blob.wallets && blob.wallets.length ? blob.wallets : DEF_WALLETS.slice();
+      categories = blob.categories && blob.categories.length ? blob.categories : DEF_CATEGORIES.slice();
+      await Store.bulkPut('transactions', txs); await Store.bulkPut('rules', rules);
+      await Store.bulkPut('budgets', budgets); await Store.bulkPut('goals', goals);
+      await Store.bulkPut('wallets', wallets); await Store.bulkPut('categories', categories);
+      state = Object.assign(defaultState(), blob.state, { v: 2 });
+    } else {
+      // شروع تازه: اگر حساب دیگری قبلاً داده گذاشته، پاک می‌شود — داده‌ی هر حساب شخصی است
+      for (const s of ['transactions', 'rules', 'budgets', 'goals', 'wallets', 'categories']) { try { await Store.clear(s); } catch (e) {} }
+      txs = []; rules = []; budgets = []; goals = [];
+      wallets = DEF_WALLETS.slice(); categories = DEF_CATEGORIES.slice();
+      await Store.bulkPut('wallets', wallets); await Store.bulkPut('categories', categories);
+      state = defaultState();
+      state.account = { name: reg.name, code: reg.code, createdAt: reg.createdAt || Date.now() };
+      // اشتراک/کوارتای قبلی همین حساب (اگر در رجیستری ثبت شده) حفظ می‌شود
+      if (reg.proSnapshot) { state.pro = reg.proSnapshot; state.trialStart = reg.trialStart || 0; state.quota = reg.quotaSnapshot || state.quota; }
+    }
+    if (!state.account.code) state.account.code = reg.code;
+    await saveState();
+    await saveAccBlob();
+  }
+  /* — صفحه ورود / ثبت‌نام (دو تب) — */
   function showAuth() {
+    unlocked = false;
     const sc = document.getElementById('authScreen');
-    if (!sc) { unlocked = true; afterUnlock(); return; }
+    if (!sc) return;
     sc.classList.remove('hidden');
     const err = document.getElementById('authErr');
+    const showErr = (t) => { err.textContent = t || ''; if (t) { Bridge.vibrate(60); try { sc.classList.remove('shake'); void sc.offsetWidth; sc.classList.add('shake'); } catch (e) {} } };
+    // تب‌ها
+    const tabReg = document.getElementById('tabReg'), tabLogin = document.getElementById('tabLogin');
+    const paneReg = document.getElementById('authRegPane'), paneLogin = document.getElementById('authLoginPane');
+    const setTab = (login) => {
+      tabReg.classList.toggle('on', !login); tabLogin.classList.toggle('on', login);
+      tabReg.setAttribute('aria-selected', String(!login)); tabLogin.setAttribute('aria-selected', String(login));
+      paneReg.classList.toggle('hidden', login); paneLogin.classList.toggle('hidden', !login);
+      err.textContent = '';
+      setTimeout(() => { try { (login ? document.getElementById('loginName') : document.getElementById('authName')).focus(); } catch (e) {} }, 120);
+    };
+    tabReg.onclick = () => setTab(false);
+    tabLogin.onclick = () => setTab(true);
+    /* — ثبت‌نام: ساخت حساب شخصی جدید + ۲۴ ساعت دوره تست + کد حساب — */
     const submit = async () => {
       const name = document.getElementById('authName').value.trim();
       const p1 = document.getElementById('authPass').value;
       const p2 = document.getElementById('authPass2').value;
-      if (name.length < 2) { err.textContent = 'نام باید حداقل ۲ حرف باشد'; return; }
-      if (p1.length < 4) { err.textContent = 'رمز باید حداقل ۴ کاراکتر باشد'; return; }
-      if (p1 !== p2) { err.textContent = 'تکرار رمز مطابقت ندارد'; return; }
+      if (name.length < 2) { showErr('نام باید حداقل ۲ حرف باشد'); return; }
+      if (p1.length < 4) { showErr('رمز باید حداقل ۴ کاراکتر باشد'); return; }
+      if (p1 !== p2) { showErr('تکرار رمز مطابقت ندارد'); return; }
+      const regs = getRegistry();
+      if (regs.some(r => (r.nameLower || r.name.toLowerCase()) === name.toLowerCase())) { showErr('حسابی با این نام قبلاً ساخته شده — از تب «ورود به حساب کاربری» وارد شو'); return; }
       err.textContent = '';
       const salt = String(Math.random()).slice(2, 10);
-      state.account = { name, code: newAccCode(), salt, passHash: simpleHash(p1 + salt), createdAt: Date.now() };
-      state.trialStart = Date.now();                // 🎁 ۲۴ ساعت تست کامل پرو
-      await saveState();
+      const code = newAccCode();
+      const reg = { code, name, nameLower: name.toLowerCase(), salt, passHash: simpleHash(p1 + salt), createdAt: Date.now(), logoutUsed: 0 };
+      regs.push(reg); setRegistry(regs);
+      setSession(code);
+      await loadAccSession(reg, true);
+      state.trialStart = Date.now();                // 🎁 ۲۴ ساعت دوره تست (فقط قابلیت‌های رایگان)
+      state.account = { name, code, createdAt: reg.createdAt };
+      await saveState(); await saveAccBlob();
       sc.classList.add('hidden');
       unlocked = true;
       const m = UI.modal('🎉 خوش آمدی ' + esc(name) + '!', `
         <div style="text-align:center">
-          <p style="font-size:12.5px;line-height:2;color:var(--txt2);margin:0 0 10px">حساب شخصی‌ات ساخته شد و <b style="color:var(--ok2)">۲۴ ساعت دسترسی کامل پرو</b> فعال است 🎁</p>
+          <p style="font-size:12.5px;line-height:2;color:var(--txt2);margin:0 0 10px">حساب شخصی‌ات ساخته شد و <b style="color:var(--warn2)">۲۴ ساعت دوره تست</b> فعال است 🎁<br><small style="color:var(--txt3)">در دوره تست همه قابلیت‌های رایگان در دسترس است؛ برای قابلیت‌های حرفه‌ای، پرو را فعال کن.</small></p>
           <div class="acc-code-row"><div><div class="acc-code-lbl">کد حساب تو — هنگام خرید توکن لازم می‌شود</div><div class="acc-code-val">${esc(state.account.code)}</div></div><button class="copy-code-btn" id="copyAccBtn1">📋 کپی</button></div>
           <p class="tok-hint" style="text-align:center">این کد در <b>تنظیمات ← حساب کاربری</b> همیشه در دسترس است</p>
         </div>
@@ -238,7 +346,80 @@ const App = (() => {
       const el = document.getElementById(id);
       if (el) el.onkeydown = e => { if (e.key === 'Enter') submit(); };
     });
+    /* — ورود به حساب کاربری موجود (روی همین گوشی) — */
+    const doLogin = async () => {
+      const name = document.getElementById('loginName').value.trim();
+      const pass = document.getElementById('loginPass').value;
+      if (!name || !pass) { showErr('نام حساب و رمز را وارد کن'); return; }
+      const regs = getRegistry();
+      const reg = regs.find(r => (r.nameLower || r.name.toLowerCase()) === name.toLowerCase());
+      if (!reg) { showErr('حسابی با این نام روی این گوشی پیدا نشد — اول ثبت‌نام کن'); return; }
+      if (simpleHash(pass + reg.salt) !== reg.passHash) { showErr('رمز حساب اشتباه است'); return; }
+      err.textContent = '';
+      setSession(reg.code);
+      await loadAccSession(reg, false);
+      if (!state.account) state.account = { name: reg.name, code: reg.code, createdAt: reg.createdAt || Date.now() };
+      state.account.name = reg.name;
+      await saveState(); await saveAccBlob();
+      sc.classList.add('hidden');
+      unlocked = true;
+      UI.toast('خوش برگشتی ' + esc(reg.name) + ' 👋', 'ok');
+      if (state.lock && state.lock.enabled) showLock(); else afterUnlock();
+    };
+    document.getElementById('loginGoBtn').onclick = doLogin;
+    ['loginName', 'loginPass'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.onkeydown = e => { if (e.key === 'Enter') doLogin(); };
+    });
     setTimeout(() => { try { document.getElementById('authName').focus(); } catch (e) {} }, 300);
+  }
+  /* — خروج از حساب با لیمیت: هر حساب فقط ۱ بار | هر گوشی فقط ۲ بار | فاصله ۲۴ ساعته — */
+  function logoutLimits() {
+    const regs = getRegistry(), code = state.account ? state.account.code : '';
+    const me = regs.find(r => r.code === code) || { logoutUsed: 0 };
+    const log = getLogoutLog();
+    const lastTs = log.length ? log[log.length - 1].ts : 0;
+    return {
+      accLeft: Math.max(0, 1 - (me.logoutUsed || 0)),
+      devLeft: Math.max(0, 2 - log.length),
+      coolLeft: lastTs ? Math.max(0, lastTs + LIC_DAY - Date.now()) : 0,
+    };
+  }
+  function logoutBlockMsg() {
+    const L = logoutLimits();
+    if (L.accLeft <= 0) return 'این حساب قبلاً یک بار از آن خارج شده‌اید — هر حساب فقط یک بار امکان خروج دارد.';
+    if (L.devLeft <= 0) return 'لیمیت خروج روی این گوشی پر شده — روی هر گوشی فقط ۲ بار می‌توان از حساب خارج شد.';
+    if (L.coolLeft > 0) return 'لیمیت خروج ۲۴ ساعته است — ' + faDigits(Math.max(1, Math.ceil(L.coolLeft / 3600000))) + ' ساعت دیگر می‌توانی خارج شوی.';
+    return '';
+  }
+  async function performLogout() {
+    Bridge.vibrate(40);
+    await saveAccBlob();
+    const regs = getRegistry(), code = state.account ? state.account.code : '';
+    const me = regs.find(r => r.code === code);
+    if (me) { me.logoutUsed = (me.logoutUsed || 0) + 1; setRegistry(regs); }
+    const log = getLogoutLog(); log.push({ ts: Date.now(), code }); saveLogoutLog(log);
+    setSession('');
+    // پاک‌سازی حافظه و نمایش صفحه ورود
+    txs = []; rules = []; budgets = []; goals = []; wallets = []; categories = [];
+    state = defaultState();
+    lastRates = null;
+    removeTrialTimer();
+    unlocked = false;
+    document.querySelectorAll('#modalRoot .modal-backdrop').forEach(x => x.remove());
+    const ms = document.getElementById('menuSheet'); if (ms) ms.classList.add('hidden');
+    UI.toast('از حساب خارج شدی ✅', 'ok');
+    showAuth();
+  }
+  function logoutConfirm() {
+    const block = logoutBlockMsg();
+    if (block) { UI.toast('⛔ ' + block, 'warn'); Bridge.vibrate(80); return; }
+    const L = logoutLimits();
+    UI.confirm('خروج از حساب؟',
+      `پس از خروج، برای ورود دوباره باید نام و رمز حساب را بزنی. داده‌های این حساب امن نگه داشته می‌شود.<br><br>` +
+      `<small style="color:var(--txt3);line-height:2">لیمیت خروج: هر حساب فقط <b>۱ بار</b> • هر گوشی فقط <b>۲ بار</b> • فاصله بین خروج‌ها <b>۲۴ ساعت</b><br>` +
+      `باقی‌مانده برای این حساب: ${faDigits(L.accLeft)} بار • برای این گوشی: ${faDigits(L.devLeft)} بار</small>`,
+      async () => { await performLogout(); });
   }
   /* — تایمر نئونی قرمز دوره تست ۲۴ ساعته — */
   let trialInt = null;
@@ -264,16 +445,18 @@ const App = (() => {
       const left = trialLeftMs();
       if (left <= 0) { removeTrialTimer(); return; }
       const h = Math.floor(left / 3600000), mi = Math.floor((left % 3600000) / 60000), s = Math.floor((left % 60000) / 1000);
-      el.innerHTML = '⏳ ' + faDigits(pad(h) + ':' + pad(mi) + ':' + pad(s)) + ' <small>پایان تست پرو</small>';
+      el.innerHTML = '⏳ ' + faDigits(pad(h) + ':' + pad(mi) + ':' + pad(s)) + ' <small>پایان دوره تست</small>';
     };
     tick();
     if (trialInt) clearInterval(trialInt);
     trialInt = setInterval(tick, 1000);
   }
-  /* — صفحه طلایی پرو + دو روش خرید — */
+  /* — SVG قفل کوچک با ستاره طلایی داخلش (نشانه اشتراک پرو) — */
+  const LOCK_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 10.2V7.9a4.5 4.5 0 0 1 9 0v2.3" fill="none" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/><rect x="4.6" y="10.2" width="14.8" height="10.4" rx="3" fill="rgba(251,191,36,.16)" stroke="#fbbf24" stroke-width="1.9"/><path d="M12 12.4l1.05 2.13 2.35.34-1.7 1.66.4 2.34L12 17.75l-2.1 1.11.4-2.34-1.7-1.66 2.35-.34z" fill="#fde68a"/></svg>`;
+  /* — صفحه طلایی پرو + دو روش خرید + انیمیشن‌های رنگی — */
   function showProModal(reason) {
     const why = PRO_REASONS[reason] ? `<p style="font-size:11.5px;color:var(--warn2);text-align:center;margin:0 0 4px;font-weight:700">⚠ ${esc(PRO_REASONS[reason])}</p>` : '';
-    const trialNote = trialActive() ? `<div class="pro-trial-note">🎁 دوره تست پرو فعال — ${faDigits(Math.max(1, Math.ceil(trialLeftMs() / 3600000)))} ساعت باقی‌مانده</div>` : '';
+    const trialNote = trialActive() ? `<div class="pro-trial-note">🎁 دوره تست فعال است — در تست فقط قابلیت‌های رایگان در دسترس‌اند (${faDigits(Math.max(1, Math.ceil(trialLeftMs() / 3600000)))} ساعت باقی‌مانده)</div>` : '';
     const m = UI.modal('⭐ فینوا پرو', `
       <div class="pro-modal">
         <div class="pro-head">
@@ -282,7 +465,7 @@ const App = (() => {
           ${trialNote}
         </div>
         ${why}
-        <div class="pro-feats">${PRO_FEATURES.map(f => `<div class="pro-feat"><div class="pf-ico">${f.ico}</div><div><div class="pf-t">${f.t}</div><div class="pf-s">${f.s}</div></div></div>`).join('')}</div>
+        <div class="pro-feats">${PRO_FEATURES.map(f => `<div class="pro-feat"><div class="pf-lock" title="نیازمند اشتراک پرو">${LOCK_SVG}</div><div><div class="pf-t">${f.t}</div><div class="pf-s">${f.s}</div></div></div>`).join('')}</div>
         <div class="pro-sep">روش خرید</div>
         <div class="pro-methods">
           <button class="btn-gold" id="buyMyketBtn">🛒 خرید درون‌برنامه‌ای مایکت</button>
@@ -325,7 +508,7 @@ const App = (() => {
   function subStatusHTML() {
     const pe = proExpiresAt();
     if (pe) return `<div><span class="sub-status pro">⭐ پرو فعال تا ${jTsLabel(pe)}</span></div>`;
-    if (trialActive()) return `<div><span class="sub-status trial">🎁 دوره تست پرو — ${faDigits(Math.max(1, Math.ceil(trialLeftMs() / 3600000)))} ساعت باقی‌مانده</span></div>`;
+    if (trialActive()) return `<div><span class="sub-status trial">🎁 دوره تست — ${faDigits(Math.max(1, Math.ceil(trialLeftMs() / 3600000)))} ساعت باقی‌مانده (فقط قابلیت‌های رایگان)</span></div>`;
     return `<div><span class="sub-status free">نسخه رایگان</span></div>`;
   }
 
@@ -488,6 +671,7 @@ const App = (() => {
   }
 
   async function persist(kind) {
+    markBlobDirty();
     if (kind === 'transactions') await Store.bulkPut('transactions', txs);
     if (kind === 'rules') await Store.bulkPut('rules', rules);
     if (kind === 'budgets') await Store.bulkPut('budgets', budgets);
@@ -773,10 +957,8 @@ const App = (() => {
     </div>
 
     ${!proExpiresAt() ? `
-    <button class="pro-cta" id="proCta" aria-label="ارتقا به نسخه پرو">
-      <span class="pro-cta-ico">⭐</span>
-      <span class="pro-cta-txt">ارتقا به نسخه پرو</span>
-      <span class="pro-cta-sub">${faDigits(PRO_FEATURES.length)} قابلیت فعال می‌شود</span>
+    <button class="pro-cta" id="proCta" aria-label="ارتقا به نسخه پرو — ${faDigits(PRO_FEATURES.length)} قابلیت فعال می‌شود">
+      <img class="pro-cta-img" src="img/pro-upgrade.png" alt="ارتقا به نسخه پرو — دسترسی نامحدود به همه امکانات ویژه">
     </button>` : `<div class="pro-active-strip">⭐ اشتراک پرو فعال است${proExpiresAt() ? ' تا ' + jTsLabel(proExpiresAt()) : ''} — همه قابلیت‌ها آزادند ✨</div>`}`;
   }
 
@@ -1494,6 +1676,12 @@ const App = (() => {
       </div>
       ${!isPro() ? '<button class="btn-gold" id="proUpBtn" style="margin-top:12px">⭐ ارتقا به نسخه پرو</button>' : ''}
     </div>` : ''}
+    ${acc ? `
+    <div class="card logout-card">
+      <div class="card-title">🚪 خروج از حساب</div>
+      <p class="logout-limits">لیمیت خروج: هر حساب فقط <b>۱ بار</b> • روی هر گوشی فقط <b>۲ بار</b> • فاصله بین خروج‌ها <b>۲۴ ساعت</b><br>باقی‌مانده این حساب: <b>${faDigits(logoutLimits().accLeft)}</b> بار • باقی‌مانده این گوشی: <b>${faDigits(logoutLimits().devLeft)}</b> بار${logoutLimits().coolLeft > 0 ? '<br>زمان انتظار تا خروج بعدی: <b>' + faDigits(Math.max(1, Math.ceil(logoutLimits().coolLeft / 3600000))) + ' ساعت</b>' : ''}</p>
+      <button class="btn-logout" id="logoutBtn">🚪 خروج از حساب کاربری</button>
+    </div>` : ''}
     <div class="card">
       <div class="card-title">🔐 قفل و امنیت</div>
       <div class="switch-row"><span>قفل با رمز (PIN ۴ رقمی)</span><label class="switch"><input type="checkbox" id="swLock" ${state.lock && state.lock.enabled ? 'checked' : ''}><span class="sw"></span></label></div>
@@ -1624,6 +1812,7 @@ const App = (() => {
     if (t.closest('#rateMyketBtn')) return showRatingDialog('settings');
     // پرو و حساب
     if (t.closest('#proCta') || t.closest('#proUpBtn')) return showProModal('home');
+    if (t.closest('#logoutBtn')) return logoutConfirm();
     if (t.closest('#copyAccBtn')) return copyText(state.account ? state.account.code : '');
     if (t.closest('#bkEncBtn')) { if (!isPro()) return showProModal('backup'); return backupFile(true); }   // پشتیبان رمزنگاری‌شده: پرو (نامحدود)
     if (t.closest('#bkPlainBtn')) return backupFile(false);
@@ -1685,12 +1874,16 @@ const App = (() => {
     UI.confirm('پاک‌سازی کامل!', 'همه داده‌ها برای همیشه حذف می‌شوند و قابل بازگشت نیستند. حساب کاربری، اشتراک پرو و توکن‌های فعال‌شده حفظ می‌شوند. مطمئنی؟', async () => {
       // حساب و اشتراک حفظ می‌شود تا توکن‌های خریداری‌شده از بین نرود
       const keep = { account: state.account, trialStart: state.trialStart, pro: state.pro, quota: state.quota, openCount: state.openCount, rateAsk: state.rateAsk };
+      // رجیستری حساب‌ها، نشست و لیمیت خروج هم باید از پاک‌شدن محافظت شوند
+      const regs = getRegistry(), sess = getSession(), llog = getLogoutLog();
       await Store.wipeAll();
+      setRegistry(regs); setSession(sess); saveLogoutLog(llog);
       txs = []; rules = []; budgets = []; goals = []; wallets = DEF_WALLETS.slice(); categories = DEF_CATEGORIES.slice();
       state = defaultState();
       Object.assign(state, keep);
       await Store.bulkPut('categories', categories); await Store.bulkPut('wallets', wallets);
       await saveState();
+      await saveAccBlob();
       UI.toast('همه داده‌ها واقعاً پاک شد ✅', 'ok');
       startTrialTimer();
       render('dashboard');
