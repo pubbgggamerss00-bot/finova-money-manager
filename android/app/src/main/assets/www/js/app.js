@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.7.0';
+  const APP_VERSION = '1.8.0';
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -50,6 +50,9 @@ const App = (() => {
     // تم برنامه — برای کاربران قدیمی و مقدار نامعتبر → نئون
     if (!['neon', 'classic', 'pop'].includes(state.theme)) state.theme = 'neon';
     state.themeChanges = +(state.themeChanges || 0) || 0;
+    // فونت برنامه — مقدار نامعتبر → وزیرمتن (پیش‌فرض)
+    if (!FONTS[state.font]) state.font = 'vazirmatn';
+    state.fontChanges = +(state.fontChanges || 0) || 0;
     // فیلدهای حساب/اشتراک — برای کاربران قدیمی هم ساخته شوند
     state.account = state.account || null;
     state.trialStart = +state.trialStart || 0;
@@ -70,6 +73,7 @@ const App = (() => {
 
     try { Splash.step(86, 'آماده‌سازی رابط کاربری…'); } catch (e) {}
     applyTheme();
+    applyFont();
     document.getElementById('topDate').textContent = todayLabel();
     try { const vEl = document.getElementById('spVer'); if (vEl) vEl.textContent = 'نسخه ' + faDigits(APP_VERSION).replace('.', '٫'); } catch (e) {}
     try { Splash.done(); } catch (e) {}
@@ -110,6 +114,7 @@ const App = (() => {
     return {
       v: 2, dark: true, fontScale: 1,
       theme: 'neon', themeChanges: 0,          // شخصی‌سازی: تم فعال + تعداد تغییر رایگان
+      font: 'vazirmatn', fontChanges: 0,       // شخصی‌سازی r19: فونت فعال (۵ فونت خفن) + تعداد تغییر رایگان
       lock: { enabled: false, pinHash: '', salt: '' },
       strict: { enabled: false, pct: 20 },
       notify: { days: [7, 3, 1], budgetAlert: true, balanceAlert: true },
@@ -1689,7 +1694,7 @@ const App = (() => {
       <button class="btn-logout" id="logoutBtn">🚪 خروج از حساب کاربری</button>
     </div>` : ''}
     <div class="card">
-      <div class="card-title">🎨 شخصی‌سازی ${isPro() ? '<span class="pers-badge" style="background:rgba(16,185,129,.14);color:var(--ok2);border-color:rgba(16,185,129,.4)">پرو — نامحدود</span>' : `<span class="pers-badge">${isPro() ? '' : 'فرصت رایگان: ' + faDigits(Math.max(0, 1 - (state.themeChanges || 0)))} بار</span>`}</div>
+      <div class="card-title">🎨 شخصی‌سازی ${isPro() ? '<span class="pers-badge" style="background:rgba(16,185,129,.14);color:var(--ok2);border-color:rgba(16,185,129,.4)">پرو — نامحدود</span>' : `<span class="pers-badge">فرصت رایگان: تم ${faDigits(Math.max(0, 1 - (state.themeChanges || 0)))} • فونت ${faDigits(Math.max(0, 1 - (state.fontChanges || 0)))} بار</span>`}</div>
       <p style="font-size:11.5px;color:var(--txt2);line-height:1.9;margin:0 0 6px">ظاهر فینوا را به سلیقه خودت عوض کن — با هر تم، رنگ‌ها، فونت اعداد و انیمیشن‌های برنامه عوض می‌شود.</p>
       <div class="theme-grid">
         ${Object.keys(THEMES).map(k => {
@@ -1702,6 +1707,19 @@ const App = (() => {
         }).join('')}
       </div>
       ${!isPro() ? `<p class="hint" style="margin-top:9px">🎨 شخصی‌سازی کامل مخصوص <b>نسخه پرو</b> است — نسخه رایگان فقط <b>${faDigits(1)}</b> بار می‌تواند تم را تغییر دهد.${(state.themeChanges || 0) >= 1 ? '<br>فرصت رایگانت تمام شده؛ برای تغییر تم‌های دیگر نسخه پرو را فعال کن ⭐' : ''}</p>` : ''}
+      <div class="font-sec-title"><span class="fsn-dot"></span>✒️ فونت برنامه — ۵ فونت خفن</div>
+      <div class="font-grid">
+        ${Object.keys(FONTS).map(k => {
+          const fo = FONTS[k];
+          const locked = !isPro() && (state.fontChanges || 0) >= 1 && state.font !== k;
+          return `<button class="font-opt ${state.font === k ? 'on' : ''}" data-font-opt="${k}" aria-label="فونت ${fo.name}" aria-pressed="${state.font === k}">
+            ${locked ? `<span class="t-lock">${LOCK_SVG}</span>` : ''}
+            <span class="font-sample" style="font-family:${fo.stack}">فینوا ۱۲۳ ابجد</span>
+            <span class="font-name">${fo.name}<small>${state.font === k ? '✓ فعال' : fo.desc}</small></span>
+          </button>`;
+        }).join('')}
+      </div>
+      ${!isPro() ? `<p class="hint" style="margin-top:9px">✒️ فونت‌های خفن مخصوص <b>نسخه پرو</b> است — نسخه رایگان فقط <b>${faDigits(1)}</b> بار می‌تواند فونت را عوض کند.${(state.fontChanges || 0) >= 1 ? '<br>فرصت رایگان فونت تمام شده؛ برای فونت‌های دیگر نسخه پرو را فعال کن ⭐' : ''}</p>` : ''}
     </div>
     <div class="card">
       <div class="card-title">🔐 قفل و امنیت</div>
@@ -1835,6 +1853,45 @@ const App = (() => {
     UI.toast(`تم «${THEMES[t].name}» فعال شد 🎨`, 'ok');
     if (curTab === 'settings') render('settings');
   }
+  /* ── فونت‌های برنامه (شخصی‌سازی r19 — ۵ فونت خفن؛ پرو نامحدود، رایگان ۱ بار) ── */
+  const FONTS = {
+    vazirmatn: { name: 'وزیرمتن', desc: 'پیش‌فرض فینوا', stack: "'Vazirmatn','Segoe UI',Tahoma,sans-serif" },
+    amiri: { name: 'امیری', desc: 'نسخ کلاسیک و ادبی', stack: "'Amiri','Vazirmatn',serif" },
+    lalezar: { name: 'لاله‌زار', desc: 'تیتری و نمایشی', stack: "'Lalezar','Vazirmatn',sans-serif" },
+    markazi: { name: 'مرکزی', desc: 'شیک و مطبوعاتی', stack: "'Markazi Text','Vazirmatn',serif" },
+    estedad: { name: 'استعداد', desc: 'مدرن و هندسی', stack: "'Estedad','Vazirmatn',sans-serif" },
+    shabnam: { name: 'شبنم', desc: 'گرد و دوستانه', stack: "'Shabnam','Vazirmatn',sans-serif" },
+  };
+  function applyFont() {
+    const f = FONTS[state.font] ? state.font : 'vazirmatn';
+    document.body.dataset.font = f;
+  }
+  /* — فلش نمایشی هنگام تعویض فونت — */
+  function fontFlash(f) {
+    try {
+      const fo = FONTS[f] || FONTS.vazirmatn;
+      const d = document.createElement('div');
+      d.className = 'font-flash';
+      d.innerHTML = `<div class="font-flash-pill" style="font-family:${fo.stack}">فونت «${fo.name}» فعال شد ✒️</div>`;
+      document.body.appendChild(d);
+      setTimeout(() => { try { d.remove(); } catch (e) {} }, 1250);
+      document.body.classList.add('theme-swap');
+      setTimeout(() => document.body.classList.remove('theme-swap'), 680);
+    } catch (e) {}
+  }
+  /* — انتخاب فونت از بخش شخصی‌سازی (پرو نامحدود، رایگان ۱ بار) — */
+  async function applyAppFont(f) {
+    if (!FONTS[f]) return;
+    if (state.font === f) { UI.toast('این فونت همین حالا فعال است ✒️', 'ok'); return; }
+    if (!isPro() && (state.fontChanges || 0) >= 1) return showProModal('personalization');
+    state.font = f;
+    if (!isPro()) state.fontChanges = (state.fontChanges || 0) + 1;
+    applyFont();
+    fontFlash(f);
+    await saveState();
+    UI.toast(`فونت «${FONTS[f].name}» فعال شد ✒️`, 'ok');
+    if (curTab === 'settings') render('settings');
+  }
   function viewClickHandler(e) {
     const t = e.target;
     // ناوبری‌ها
@@ -1884,6 +1941,9 @@ const App = (() => {
     // شخصی‌سازی — انتخاب تم
     const thOpt = t.closest('[data-theme-opt]');
     if (thOpt) return applyAppTheme(thOpt.dataset.themeOpt);
+    // شخصی‌سازی — انتخاب فونت
+    const foOpt = t.closest('[data-font-opt]');
+    if (foOpt) return applyAppFont(foOpt.dataset.fontOpt);
     if (t.closest('#bkEncBtn')) { if (!isPro()) return showProModal('backup'); return backupFile(true); }   // پشتیبان رمزنگاری‌شده: پرو (نامحدود)
     if (t.closest('#bkPlainBtn')) return backupFile(false);
     if (t.closest('#restoreBtn')) return pickFileAndRestore();

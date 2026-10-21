@@ -2,6 +2,15 @@
 @font-face{font-family:'Vazirmatn';src:url('../fonts/Vazirmatn-Regular.woff2') format('woff2');font-weight:400;font-display:swap}
 @font-face{font-family:'Vazirmatn';src:url('../fonts/Vazirmatn-Bold.woff2') format('woff2');font-weight:700;font-display:swap}
 @font-face{font-family:'Vazirmatn';src:url('../fonts/Vazirmatn-Black.woff2') format('woff2');font-weight:900;font-display:swap}
+/* ── فونت‌های انتخابی شخصی‌سازی — ۵ فونت خفن (r19) ── */
+@font-face{font-family:'Lalezar';src:url('../fonts/Lalezar-Regular.woff2') format('woff2');font-weight:400;font-display:swap;unicode-range:U+0600-06FF,U+0750-077F,U+FB50-FDFF,U+FE70-FEFC,U+200C-200E,U+2010-2011}
+@font-face{font-family:'Lalezar';src:url('../fonts/Lalezar-Latin.woff2') format('woff2');font-weight:400;font-display:swap;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215}
+@font-face{font-family:'Markazi Text';src:url('../fonts/Markazi-Regular.woff2') format('woff2');font-weight:400 700;font-display:swap;unicode-range:U+0600-06FF,U+0750-077F,U+FB50-FDFF,U+FE70-FEFC,U+200C-200E,U+2010-2011}
+@font-face{font-family:'Markazi Text';src:url('../fonts/Markazi-Latin.woff2') format('woff2');font-weight:400 700;font-display:swap;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215}
+@font-face{font-family:'Shabnam';src:url('../fonts/Shabnam-Regular.woff2') format('woff2');font-weight:400;font-display:swap}
+@font-face{font-family:'Shabnam';src:url('../fonts/Shabnam-Bold.woff2') format('woff2');font-weight:700;font-display:swap}
+@font-face{font-family:'Estedad';src:url('../fonts/Estedad-Regular.woff2') format('woff2');font-weight:400;font-display:swap}
+@font-face{font-family:'Estedad';src:url('../fonts/Estedad-Bold.woff2') format('woff2');font-weight:700;font-display:swap}
 :root{
   --bg:#0b1120; --bg2:#0f172a; --card:#131c31; --card2:#1a2540;
   --line:#243250; --line2:#31446e;
@@ -33,10 +42,17 @@ body.light{
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0;height:100%}
 body{
-  font-family:'Vazirmatn',Vazirmatn,'Segoe UI',Tahoma,sans-serif;
+  --app-font:'Vazirmatn','Segoe UI',Tahoma,sans-serif;
+  font-family:var(--app-font);
   background:var(--bg); color:var(--txt); direction:rtl;
   overscroll-behavior-y:none; user-select:none;
 }
+/* ── فونت فعال برنامه (شخصی‌سازی) — body[data-font] ── */
+body[data-font="amiri"]{--app-font:'Amiri','Vazirmatn',serif}
+body[data-font="lalezar"]{--app-font:'Lalezar','Vazirmatn',sans-serif}
+body[data-font="markazi"]{--app-font:'Markazi Text','Vazirmatn',serif}
+body[data-font="estedad"]{--app-font:'Estedad','Vazirmatn',sans-serif}
+body[data-font="shabnam"]{--app-font:'Shabnam','Vazirmatn',sans-serif}
 input,textarea,select{font-family:inherit; user-select:text}
 button{font-family:inherit; cursor:pointer; border:none; background:none; color:inherit}
 .hidden{display:none!important}
@@ -766,3 +782,23 @@ body[data-theme="pop"] .theme-opt.on::after{color:#0c0c1d}
 .theme-opt .t-lock{position:absolute; top:6px; left:6px; width:21px; height:21px; z-index:3; display:grid; place-items:center; filter:drop-shadow(0 1px 3px rgba(0,0,0,.6))}
 .theme-opt .t-lock svg{width:20px; height:20px}
 .pers-badge{display:inline-flex; align-items:center; gap:5px; font-size:10.5px; font-weight:800; padding:3px 9px; border-radius:99px; background:rgba(251,191,36,.14); color:var(--warn2); border:1px solid rgba(251,191,36,.4)}
+
+/* ── انتخابگر فونت شخصی‌سازی (r19) ── */
+.font-sec-title{display:flex; align-items:center; gap:7px; font-size:12.5px; font-weight:900; color:var(--txt); margin:15px 0 2px}
+.font-sec-title .fsn-dot{width:7px; height:7px; border-radius:50%; background:var(--acc); box-shadow:var(--glow-acc); flex:none}
+.font-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-top:8px}
+.font-opt{position:relative; display:flex; flex-direction:column; gap:7px; padding:12px 11px 11px; border-radius:16px; border:2px solid var(--line); background:var(--card2); transition:.2s; overflow:hidden; text-align:right}
+.font-opt:active{transform:scale(.94)}
+.font-opt.on{border-color:var(--pri); box-shadow:var(--glow)}
+.font-opt.on::after{content:"✓"; position:absolute; top:5px; left:6px; width:18px; height:18px; border-radius:50%; background:var(--pri); color:#04121c; font-size:11px; font-weight:900; display:grid; place-items:center; z-index:3}
+body[data-theme="classic"] .font-opt.on::after{color:#1a1204}
+body[data-theme="pop"] .font-opt.on::after{color:#0c0c1d}
+.font-sample{font-size:17.5px; font-weight:700; color:var(--txt); line-height:1.75; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-height:31px; direction:rtl}
+.font-name{font-size:11.5px; font-weight:800; color:var(--txt)}
+.font-name small{display:block; font-size:9.5px; font-weight:600; color:var(--txt3); margin-top:2px}
+.font-opt .t-lock{position:absolute; top:6px; left:6px; width:21px; height:21px; z-index:3; display:grid; place-items:center; filter:drop-shadow(0 1px 3px rgba(0,0,0,.6))}
+.font-opt .t-lock svg{width:20px; height:20px}
+/* — فلش نمایشی تعویض فونت — */
+.font-flash{position:fixed; inset:0; z-index:99998; pointer-events:none; display:grid; place-items:center; padding:20px}
+.font-flash-pill{font-size:19px; font-weight:900; color:#fff; background:rgba(8,12,24,.9); border:1.5px solid var(--pri); padding:14px 24px; border-radius:18px; box-shadow:var(--glow),0 14px 44px rgba(0,0,0,.55); animation:fontPop 1.2s cubic-bezier(.2,1.25,.3,1) forwards}
+@keyframes fontPop{0%{opacity:0; transform:scale(.62) translateY(14px)}16%{opacity:1; transform:scale(1.05)}28%{transform:scale(1)}76%{opacity:1; transform:scale(1)}100%{opacity:0; transform:scale(.93) translateY(-10px)}}
