@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.10.0';
+  const APP_VERSION = '1.10.1';
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -144,6 +144,7 @@ const App = (() => {
   const TOK_ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // ۳۱ نویسه بدون I,L,O,0,1 — برای کد حساب
   // سرور مرکزی بررسی توکن‌های پرو — همه اطلاعات توکن از اینجا دریافت می‌شود
   const TOKEN_API = 'https://muddy-finova-5405.amineshgi-1386.workers.dev';
+  const PRO_UNLIMITED_MS = 8640000000000000; // توکن نامحدود — عملاً بی‌پایان
   const PRO_FEATURES = [
     { ico: '🌐', t: 'هوش مصنوعی آنلاین روزی ۱۰ پیام', s: 'نسخه رایگان فقط ۲ پیام — پرو ۱۰ پیام در روز برای دستیار و تحلیل سرمایه‌گذاری' },
     { ico: '📈', t: 'تحلیل سرمایه‌گذاری کامل', s: 'بروزرسانی نامحدود قیمت‌های واقعی + بروزرسانی خودکار هر ۶۰ ثانیه' },
@@ -175,10 +176,11 @@ const App = (() => {
     return !!(state.pro && state.pro.expiresAt > Date.now());
   }
   function proExpiresAt() { return state.pro && state.pro.expiresAt > Date.now() ? state.pro.expiresAt : 0; }
+  function proUnlimited() { return !!(state.pro && state.pro.expiresAt >= PRO_UNLIMITED_MS); }
   function trialLeftMs() { return state.trialStart ? Math.max(0, state.trialStart + LIC_DAY - Date.now()) : 0; }
   function trialActive() { return trialLeftMs() > 0; }
   function todayKey() { return jKey(jToday()); }
-  function jTsLabel(ts) { try { return jDateLabel(jKey(Jalali.toJalali(new Date(ts)))); } catch (e) { return '—'; } }
+  function jTsLabel(ts) { try { if (ts >= PRO_UNLIMITED_MS) return 'نامحدود'; return jDateLabel(jKey(Jalali.toJalali(new Date(ts)))); } catch (e) { return '—'; } }
   /* — کوارتای هوش مصنوعی: رایگان ۲ پیام کل | پرو ۱۰ پیام در روز — */
   function aiQuotaReset() {
     const q = state.quota, tk = todayKey();
@@ -221,10 +223,11 @@ const App = (() => {
   }
   function apiTokenValid(r) {
     if (!r || typeof r !== 'object') return false;
+    // طبق قرارداد سرور: ok === true یعنی توکن معتبر است (فیلد days/unlimited/… همراهش می‌آید)
+    if (r.ok === true) return r.active !== false && r.revoked !== true && r.consumed !== true;
     if (r.valid === true) return true;
     if (r.valid === false) return false;
-    // سازگاری با فرمت‌های دیگر پاسخ سرور (وقتی فیلد valid وجود ندارد)
-    return r.ok === true && r.active !== false && r.revoked !== true && r.consumed !== true;
+    return false;
   }
   function pickField(r, keys) {
     for (let i = 0; i < keys.length; i++) { const v = r[keys[i]]; if (v !== undefined && v !== null && v !== '') return v; }
@@ -242,13 +245,14 @@ const App = (() => {
         if (!isNaN(n) && n > 0) info.expiresAt = n < 1e12 ? n * 1000 : n;   // ثانیه ← میلی‌ثانیه
       }
       const days = pickField(src, ['days', 'duration', 'durationDays', 'duration_days', 'period']);
-      if (days != null) { const n = parseInt(days, 10); if (n > 0) info.days = n; }
+      if (days != null) { const n = parseInt(days, 10); if (!isNaN(n) && n >= 0) info.days = n; }   // days === 0 یعنی نامحدود (طبق قرارداد سرور)
       const months = pickField(src, ['months', 'month']);
-      if (months != null && !info.days) { const n = parseInt(months, 10); if (n > 0) info.days = n * 30; }
+      if (months != null && info.days == null) { const n = parseInt(months, 10); if (n > 0) info.days = n * 30; }
+      if (src.unlimited === true || src.unlimited === 1 || src.unlimited === 'true' || src.unlimited === '1') info.unlimited = true;
       const extra = {};
       const known = ['plan', 'type', 'tier', 'name', 'title', 'label', 'valid', 'ok', 'msg', 'message',
         'expiresAt', 'expires_at', 'expiry', 'expires', 'expire', 'validUntil', 'valid_until', 'until', 'endAt', 'end',
-        'days', 'duration', 'durationDays', 'duration_days', 'period', 'months', 'month', 'data'];
+        'days', 'duration', 'durationDays', 'duration_days', 'period', 'months', 'month', 'unlimited', 'data'];
       for (const k in src) {
         if (known.indexOf(k) >= 0) continue;
         const v = src[k];
@@ -279,12 +283,23 @@ const App = (() => {
     try { r = await apiCheckToken(tok); } catch (e) { r = { __netFail: true }; }
     if (r && r.__netFail) return { ok: false, net: true, msg: 'اتصال به سرور برقرار نشد — اینترنت را بررسی کن و دوباره تلاش کن' };
     if (!apiTokenValid(r)) return { ok: false, msg: (r && (r.msg || r.message)) || 'توکن نامعتبر است' };
-    // سرور تأیید کرد — اعتبار بر اساس اطلاعات همین توکن از سرور محاسبه می‌شود
+    // سرور تأیید کرد — اعتبار دقیقاً بر اساس اطلاعات همین توکن از سرور محاسبه می‌شود
     const info = extractTokenInfo(r);
     info.at = Date.now();
     const base = Math.max(Date.now(), state.pro.expiresAt || 0);
-    if (info.expiresAt) state.pro.expiresAt = Math.max(base, info.expiresAt);   // انقضای مطلق از سرور (روی هم جمع هم می‌شود)
-    else state.pro.expiresAt = base + (info.days || 30) * LIC_DAY;              // مدت از سرور یا پیش‌فرض ۳۰ روز
+    // طبق قرارداد سرور: unlimited یا days === 0 → نامحدود | وگرنه days روز | یا انقضای مطلق | پیش‌فرض ۳۰ روز
+    const unlimited = !!(info.unlimited || info.days === 0);
+    if (unlimited) {
+      state.pro.expiresAt = PRO_UNLIMITED_MS;   // عملاً نامحدود
+      info.unlimited = true;
+      if (info.days === 0) delete info.days;
+    } else if (info.days) {
+      state.pro.expiresAt = base + info.days * LIC_DAY;   // سرور می‌گوید چند روزه است — همان فعال می‌شود
+    } else if (info.expiresAt) {
+      state.pro.expiresAt = Math.max(base, info.expiresAt);   // انقضای مطلق از سرور (روی هم جمع هم می‌شود)
+    } else {
+      state.pro.expiresAt = base + 30 * LIC_DAY;              // پیش‌فرض ۳۰ روز
+    }
     state.pro.used = (state.pro.used || []).concat([dashless]);
     state.pro.lastActivated = Date.now();
     state.pro.apiInfo = info;
@@ -304,8 +319,9 @@ const App = (() => {
     let h = '';
     if (info.plan) h += row('نوع توکن', esc(info.plan));
     h += row('تاریخ فعال‌سازی', jTsLabel(info.at || Date.now()));
-    h += row('انقضای اشتراک', jTsLabel(state.pro.expiresAt));
+    h += row('انقضای اشتراک', proUnlimited() ? 'نامحدود ♾️' : jTsLabel(state.pro.expiresAt));
     if (info.days) h += row('مدت اعتبار توکن', faDigits(info.days) + ' روز');
+    else if (info.unlimited) h += row('مدت اعتبار توکن', 'نامحدود ♾️');
     if (info.extra) for (const k in info.extra) h += row(esc(k), esc(info.extra[k]));
     h += row('منبع تأیید', 'سرور فینوا ✅');
     return h;
@@ -583,8 +599,13 @@ const App = (() => {
       // پاک‌سازی مودال‌های قدیمی (مثل مودال فروش پرو) — کاربر دیگر پرو است و نباید ببیندها
       Array.from(document.querySelectorAll('.modal-backdrop')).forEach(x => x.remove());
       Bridge.vibrate(80);
-      UI.toast('🎉 اشتراک پرو فعال شد تا ' + jTsLabel(state.pro.expiresAt), 'ok');
-      Bridge.showNotification('⭐ فینوا پرو فعال شد', 'اشتراک پرو تا ' + jTsLabel(state.pro.expiresAt) + ' فعال است. همه قابلیت‌ها آزاد شدند!', 9901, 'proOn');
+      if (proUnlimited()) {
+        UI.toast('🌟 اشتراک پرو نامحدود فعال شد!', 'ok');
+        Bridge.showNotification('⭐ فینوا پرو فعال شد', 'اشتراک پرو نامحدود فعال است. همه قابلیت‌ها برای همیشه آزاد شدند!', 9901, 'proOn');
+      } else {
+        UI.toast('🎉 اشتراک پرو فعال شد تا ' + jTsLabel(state.pro.expiresAt), 'ok');
+        Bridge.showNotification('⭐ فینوا پرو فعال شد', 'اشتراک پرو تا ' + jTsLabel(state.pro.expiresAt) + ' فعال است. همه قابلیت‌ها آزاد شدند!', 9901, 'proOn');
+      }
       render(curTab);
       tokenInfoModal(r.info);
     };
@@ -607,7 +628,9 @@ const App = (() => {
   }
   function subStatusHTML() {
     const pe = proExpiresAt();
-    if (pe) return `<div><span class="sub-status pro">⭐ پرو فعال تا ${jTsLabel(pe)}</span></div>`;
+    if (pe) return proUnlimited()
+      ? '<div><span class="sub-status pro">⭐ پرو نامحدود فعال است ♾️</span></div>'
+      : `<div><span class="sub-status pro">⭐ پرو فعال تا ${jTsLabel(pe)}</span></div>`;
     if (trialActive()) return `<div><span class="sub-status trial">🎁 دوره تست — ${faDigits(Math.max(1, Math.ceil(trialLeftMs() / 3600000)))} ساعت باقی‌مانده (فقط قابلیت‌های رایگان)</span></div>`;
     return `<div><span class="sub-status free">نسخه رایگان</span></div>`;
   }
@@ -1985,7 +2008,7 @@ const App = (() => {
   /* ── بنر تبریک «پرو فعال شد» — سه نسخه مطابق موکاپ‌های کاربر: کلاسیک طلایی / نئون / پاپ مدرن (r20) ── */
   function proActiveBanner() {
     const pe = proExpiresAt();
-    const sub = 'از همه امکانات ویژه لذت ببر' + (pe ? ' • فعال تا ' + jTsLabel(pe) : '');
+    const sub = 'از همه امکانات ویژه لذت ببر' + (proUnlimited() ? ' • اشتراک نامحدود ♾️' : (pe ? ' • فعال تا ' + jTsLabel(pe) : ''));
     const th = THEMES[state.theme] ? state.theme : 'neon';
     const CROWN = 'M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z';
     const CHECK = 'M5 12.5l4.5 4.5L19 7.5';
