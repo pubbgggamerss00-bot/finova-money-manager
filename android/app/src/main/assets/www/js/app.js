@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.11.0';
+  const APP_VERSION = '1.12.0';
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -356,6 +356,43 @@ const App = (() => {
     h += row('منبع تأیید', 'سرور فینوا — فعال‌سازی مرکزی ✅');
     return h;
   }
+  /* —— v1.12.0 — احراز هویت ابری: ثبت حساب در سرور + ورود از هر گوشی دیگری —— */
+  async function apiPost(path, body, timeoutMs) {
+    let res = null;
+    try {
+      res = await Bridge.http(
+        TOKEN_API + path, 'POST',
+        { 'Content-Type': 'application/json' },
+        JSON.stringify(body || {}),
+        timeoutMs || 12000
+      );
+    } catch (e) { return { ok: false, msg: 'offline', offline: true }; }
+    // Bridge.http به‌جای throw، خطای شبکه را با status:0 برمی‌گرداند → یعنی آفلاین
+    if (!res || res.ok === false && (!res.status || res.status === 0 || res.body === 'timeout')) {
+      return { ok: false, msg: 'offline', offline: true };
+    }
+    let data = null;
+    if (res && typeof res.body === 'string') {
+      try { data = JSON.parse(res.body); } catch (e) { data = null; }
+    } else if (res && res.body && typeof res.body === 'object') {
+      data = res.body;
+    } else if (res && typeof res === 'object') {
+      data = res;
+    }
+    return data || { ok: false, msg: 'پاسخ نامعتبر از سرور' };
+  }
+  async function cloudRegister(reg) {
+    try {
+      return await apiPost('/auth/register', {
+        name: reg.name, code: reg.code, salt: reg.salt, passHash: reg.passHash, createdAt: reg.createdAt
+      });
+    } catch (e) { return { ok: false, msg: 'offline', offline: true }; }
+  }
+  async function cloudLogin(name, pass) {
+    try {
+      return await apiPost('/auth/login', { name: name, pass: pass });
+    } catch (e) { return { ok: false, msg: 'offline', offline: true }; }
+  }
   function copyText(s) {
     try { navigator.clipboard.writeText(s); } catch (e) {
       const ta = document.createElement('textarea'); ta.value = s; document.body.appendChild(ta); ta.select();
@@ -451,6 +488,12 @@ const App = (() => {
       state.trialStart = Date.now();                // 🎁 ۲۴ ساعت دوره تست (فقط قابلیت‌های رایگان)
       state.account = { name, code, createdAt: reg.createdAt };
       await saveState(); await saveAccBlob();
+      // ثبت در سرور (اختیاری اگر آفلاین باشد؛ بعداً هم می‌تواند کار کند) — ورود از هر گوشی دیگر را ممکن می‌کند
+      try {
+        const cr = await cloudRegister(reg);
+        if (cr && cr.ok) UI.toast('حساب در سرور هم ثبت شد ☁️', 'ok');
+        else if (cr && !cr.offline) console.warn('cloud register:', cr.msg);
+      } catch (e) {}
       sc.classList.add('hidden');
       unlocked = true;
       const m = UI.modal('🎉 خوش آمدی ' + esc(name) + '!', `
@@ -469,15 +512,50 @@ const App = (() => {
       const el = document.getElementById(id);
       if (el) el.onkeydown = e => { if (e.key === 'Enter') submit(); };
     });
-    /* — ورود به حساب کاربری موجود (روی همین گوشی) — */
+    /* — ورود به حساب کاربری موجود (روی همین گوشی یا از سرور ابری) — */
     const doLogin = async () => {
       const name = document.getElementById('loginName').value.trim();
       const pass = document.getElementById('loginPass').value;
       if (!name || !pass) { showErr('نام حساب و رمز را وارد کن'); return; }
-      const regs = getRegistry();
-      const reg = regs.find(r => (r.nameLower || r.name.toLowerCase()) === name.toLowerCase());
-      if (!reg) { showErr('حسابی با این نام روی این گوشی پیدا نشد — اول ثبت‌نام کن'); return; }
-      if (simpleHash(pass + reg.salt) !== reg.passHash) { showErr('رمز حساب اشتباه است'); return; }
+      let regs = getRegistry();
+      let reg = regs.find(r => (r.nameLower || r.name.toLowerCase()) === name.toLowerCase());
+      // رکورد بدون passHash (مهاجرت نسخه‌های قدیمی — state.account رمز را نگه نمی‌داشت)
+      // قابل تأیید محلی نیست → مثل نبودن رفتار می‌شود تا از سرور ابری بازسازی/تأیید شود
+      const legacyBlank = !!reg && !reg.passHash;
+      if (legacyBlank) reg = null;
+      // اگر روی این گوشی نبود → ورود ابری از API (همان نام و رمز — سرور تأیید می‌کند)
+      if (!reg) {
+        showErr('در حال بررسی سرور...');
+        const cr = await cloudLogin(name, pass);
+        if (cr && cr.ok && cr.account) {
+          const built = {
+            code: cr.account.code,
+            name: cr.account.name,
+            nameLower: String(cr.account.name || '').toLowerCase(),
+            salt: cr.account.salt || '',
+            passHash: cr.account.passHash || simpleHash(pass + (cr.account.salt || '')),
+            createdAt: cr.account.createdAt || Date.now(),
+            logoutUsed: 0,
+            proSnapshot: cr.account.proSnapshot || null,
+            trialStart: cr.account.trialStart || 0,
+            quotaSnapshot: cr.account.quotaSnapshot || null,
+          };
+          const idx = regs.findIndex(x => x.code === built.code);
+          if (idx >= 0) { regs[idx] = Object.assign({}, regs[idx], built); reg = regs[idx]; }   // رکورد ناقص همین حساب بازسازی می‌شود
+          else { regs.push(built); reg = built; }
+          setRegistry(regs);
+        } else if (legacyBlank) {
+          // حساب قدیمی همین گوشی (رمزی از قبل نداشته) — بدون سرور یا حتی اگر سرور نشناخت، مستقیم وارد می‌شود
+          reg = regs.find(r => (r.nameLower || r.name.toLowerCase()) === name.toLowerCase());
+          if (!reg) { showErr((cr && cr.msg) || 'حسابی با این نام پیدا نشد — اول ثبت‌نام کن'); return; }
+        } else if (cr && cr.offline) {
+          showErr('حساب روی این گوشی نیست و اینترنت هم برقرار نشد');
+          return;
+        } else {
+          showErr((cr && cr.msg) || 'حسابی با این نام پیدا نشد — اول ثبت‌نام کن');
+          return;
+        }
+      } else if (simpleHash(pass + reg.salt) !== reg.passHash) { showErr('رمز حساب اشتباه است'); return; }
       err.textContent = '';
       setSession(reg.code);
       await loadAccSession(reg, false);

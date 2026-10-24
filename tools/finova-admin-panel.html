@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>فینوا — پنل ادمین پرو</title>
+  <style>
+    :root {
+      --bg0: #070b16;
+      --bg1: #0d1426;
+      --card: rgba(20, 28, 48, 0.85);
+      --border: rgba(108, 92, 231, 0.22);
+      --border2: rgba(255,255,255,0.06);
+      --txt: #eef2ff;
+      --txt2: #9aa6c4;
+      --muted: #6b7694;
+      --accent: #7c6cf0;
+      --accent2: #a99bff;
+      --gold: #f0c14b;
+      --gold2: #ffd76a;
+      --ok: #3dd68c;
+      --warn: #f5a623;
+      --err: #ff6b6b;
+      --radius: 16px;
+      --shadow: 0 12px 40px rgba(0,0,0,.35);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Tahoma, "Segoe UI", system-ui, sans-serif;
+      background:
+        radial-gradient(ellipse 80% 50% at 10% -10%, rgba(124,108,240,.28), transparent 50%),
+        radial-gradient(ellipse 60% 40% at 90% 10%, rgba(240,193,75,.12), transparent 45%),
+        linear-gradient(180deg, var(--bg0), var(--bg1) 40%, #0a1020);
+      color: var(--txt);
+      min-height: 100vh;
+      line-height: 1.7;
+    }
+    .wrap { max-width: 1140px; margin: 0 auto; padding: 22px 16px 70px; }
+
+    .login-wrap {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 24px 16px;
+    }
+    .login-box {
+      width: 100%; max-width: 420px;
+      background: var(--card); backdrop-filter: blur(16px);
+      border: 1px solid var(--border); border-radius: 22px;
+      padding: 36px 30px; box-shadow: var(--shadow);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .brand-ico {
+      width: 44px; height: 44px; border-radius: 14px;
+      background: linear-gradient(135deg, var(--accent), #5b4cdb);
+      display: grid; place-items: center; font-size: 1.35rem;
+      box-shadow: 0 8px 24px rgba(124,108,240,.4);
+    }
+    .login-box h1 { font-size: 1.4rem; font-weight: 800; }
+    .login-box .sub { color: var(--txt2); font-size: .9rem; margin: 6px 0 22px; }
+
+    .field { margin-bottom: 14px; }
+    .field label {
+      display: block; font-size: .8rem; color: var(--txt2);
+      margin-bottom: 6px; font-weight: 600;
+    }
+    input, select, textarea {
+      width: 100%; padding: 12px 14px; border-radius: 12px;
+      border: 1px solid var(--border2); background: rgba(0,0,0,.25);
+      color: var(--txt); font-size: .95rem; outline: none;
+      transition: border .15s, box-shadow .15s;
+    }
+    input:focus, select:focus {
+      border-color: var(--accent); box-shadow: 0 0 0 3px rgba(124,108,240,.2);
+    }
+    input[dir="ltr"], .ltr { direction: ltr; text-align: left; font-family: ui-monospace, Consolas, monospace; }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 12px 18px; border: none; border-radius: 12px;
+      font-size: .92rem; font-weight: 700; cursor: pointer;
+      transition: transform .12s, opacity .12s;
+    }
+    .btn:active { transform: scale(.97); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), #5b4cdb);
+      color: #fff; width: 100%; box-shadow: 0 8px 22px rgba(124,108,240,.35);
+    }
+    .btn-gold {
+      background: linear-gradient(135deg, #c9a227, var(--gold));
+      color: #1a1200; box-shadow: 0 8px 22px rgba(240,193,75,.25);
+    }
+    .btn-ghost {
+      background: rgba(255,255,255,.04); border: 1px solid var(--border2);
+      color: var(--txt2);
+    }
+    .btn-ghost:hover { color: var(--txt); border-color: var(--border); }
+    .btn-danger {
+      background: rgba(255,107,107,.12); border: 1px solid rgba(255,107,107,.35);
+      color: var(--err);
+    }
+    .btn-warn {
+      background: rgba(245,166,35,.12); border: 1px solid rgba(245,166,35,.35);
+      color: var(--warn);
+    }
+    .btn-ok {
+      background: rgba(61,214,140,.12); border: 1px solid rgba(61,214,140,.35);
+      color: var(--ok);
+    }
+    .btn-sm { padding: 6px 10px; font-size: .75rem; border-radius: 8px; }
+    .btn-block { width: 100%; }
+
+    .err-msg { color: var(--err); font-size: .85rem; margin-top: 12px; min-height: 1.2em; }
+    .hint { font-size: .78rem; color: var(--muted); margin-top: 8px; line-height: 1.65; }
+
+    header {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+      gap: 14px; margin-bottom: 20px; padding-bottom: 16px;
+      border-bottom: 1px solid var(--border2);
+    }
+    header .left { display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 1.25rem; font-weight: 800; }
+    .badge {
+      font-size: .7rem; padding: 4px 11px; border-radius: 20px; font-weight: 700;
+      background: rgba(61,214,140,.12); color: var(--ok);
+      border: 1px solid rgba(61,214,140,.25);
+    }
+    .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .tabs {
+      display: flex; gap: 6px; flex-wrap: wrap;
+      background: rgba(0,0,0,.22); padding: 6px; border-radius: 14px;
+      margin-bottom: 18px; border: 1px solid var(--border2);
+    }
+    .tab {
+      flex: 1; min-width: 110px; padding: 10px 12px; border: none; border-radius: 10px;
+      background: transparent; color: var(--txt2); font-weight: 700; font-size: .85rem;
+      cursor: pointer; transition: all .15s;
+    }
+    .tab:hover { color: var(--txt); background: rgba(255,255,255,.04); }
+    .tab.active {
+      background: linear-gradient(135deg, rgba(124,108,240,.35), rgba(91,76,219,.25));
+      color: #fff; box-shadow: 0 4px 14px rgba(124,108,240,.2);
+    }
+
+    .card {
+      background: var(--card); backdrop-filter: blur(12px);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 20px; box-shadow: var(--shadow); margin-bottom: 16px;
+    }
+    .card h2 {
+      font-size: 1.02rem; font-weight: 800; margin-bottom: 14px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .grid-2 { display: grid; gap: 16px; }
+    @media (min-width: 780px) { .grid-2 { grid-template-columns: 1.1fr 0.9fr; } }
+
+    .stats {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 10px; margin-bottom: 16px;
+    }
+    .stat {
+      background: rgba(0,0,0,.22); border: 1px solid var(--border2);
+      border-radius: 12px; padding: 12px 14px; text-align: center;
+    }
+    .stat .n { font-size: 1.3rem; font-weight: 800; color: var(--gold2); }
+    .stat .l { font-size: .72rem; color: var(--txt2); margin-top: 2px; }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      padding: 9px 16px; border-radius: 999px; border: 1px solid var(--border2);
+      background: rgba(0,0,0,.2); color: var(--txt2); font-weight: 700;
+      font-size: .85rem; cursor: pointer; transition: all .15s;
+    }
+    .chip:hover { border-color: var(--accent); color: var(--txt); }
+    .chip.active {
+      background: linear-gradient(135deg, rgba(240,193,75,.25), rgba(201,162,39,.15));
+      border-color: rgba(240,193,75,.5); color: var(--gold2);
+    }
+
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+    .row .field { flex: 1; min-width: 120px; margin-bottom: 0; }
+
+    .token-out {
+      margin-top: 14px; padding: 18px;
+      background: linear-gradient(135deg, rgba(124,108,240,.12), rgba(240,193,75,.06));
+      border: 1px dashed rgba(240,193,75,.4); border-radius: 14px; text-align: center;
+    }
+    .token-out .tok {
+      font-size: 1.25rem; font-weight: 800; letter-spacing: .1em;
+      color: var(--gold2); direction: ltr; font-family: ui-monospace, monospace;
+      word-break: break-all; line-height: 1.9;
+    }
+    .token-out .meta { font-size: .82rem; color: var(--txt2); margin-top: 8px; }
+
+    .table-wrap { overflow-x: auto; margin-top: 8px; border-radius: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: .81rem; }
+    th, td { padding: 10px 8px; text-align: right; border-bottom: 1px solid var(--border2); white-space: nowrap; }
+    th { color: var(--muted); font-weight: 700; font-size: .71rem; }
+    tr:hover td { background: rgba(255,255,255,.02); }
+    td.tok-cell {
+      direction: ltr; text-align: left; font-family: ui-monospace, monospace;
+      color: var(--gold2); font-weight: 600;
+    }
+    td.actions-cell { white-space: nowrap; }
+    td.actions-cell .btn { margin: 2px; }
+
+    .pill {
+      display: inline-block; padding: 3px 10px; border-radius: 999px;
+      font-size: .72rem; font-weight: 700;
+    }
+    .pill-ok { background: rgba(61,214,140,.12); color: var(--ok); }
+    .pill-err { background: rgba(255,107,107,.12); color: var(--err); }
+    .pill-warn { background: rgba(245,166,35,.14); color: var(--warn); }
+    .pill-gold { background: rgba(240,193,75,.12); color: var(--gold2); }
+
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      justify-content: space-between; margin-bottom: 12px;
+    }
+    .toolbar .right { display: flex; gap: 6px; flex-wrap: wrap; }
+
+    .empty { text-align: center; padding: 28px 12px; color: var(--muted); font-size: .9rem; }
+
+    .account-card {
+      background: rgba(0,0,0,.2); border: 1px solid var(--border2);
+      border-radius: 14px; padding: 16px; margin-top: 12px;
+    }
+    .account-card .code {
+      font-size: 1.2rem; font-weight: 800; direction: ltr; text-align: left;
+      color: var(--accent2); font-family: ui-monospace, monospace; margin-bottom: 10px;
+    }
+
+    .toast {
+      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+      background: #1a243c; color: var(--txt); padding: 12px 22px;
+      border-radius: 14px; border: 1px solid var(--border);
+      box-shadow: 0 10px 36px rgba(0,0,0,.45); z-index: 100;
+      opacity: 0; pointer-events: none; transition: opacity .25s;
+      font-size: .9rem; font-weight: 600; max-width: 90vw;
+    }
+    .toast.show { opacity: 1; }
+
+    .panel { display: none; }
+    .panel.active { display: block; animation: fadeIn .2s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+    .req { color: var(--err); }
+
+    .modal-bg {
+      position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 90;
+      display: none; align-items: center; justify-content: center; padding: 16px;
+    }
+    .modal-bg.show { display: flex; }
+    .modal {
+      background: #141c30; border: 1px solid var(--border); border-radius: 16px;
+      padding: 22px; max-width: 400px; width: 100%; box-shadow: var(--shadow);
+    }
+    .modal h3 { margin-bottom: 10px; font-size: 1.05rem; }
+    .modal p { color: var(--txt2); font-size: .88rem; margin-bottom: 16px; }
+    .modal .btns { display: flex; gap: 8px; justify-content: flex-end; }
+  </style>
+</head>
+<body>
+
+  <div id="loginScreen" class="login-wrap">
+    <div class="login-box">
+      <div class="brand">
+        <div class="brand-ico">◈</div>
+        <div><h1>پنل ادمین فینوا</h1></div>
+      </div>
+      <p class="sub">مدیریت توکن پرو — یک‌بارمصرف و قفل به حساب</p>
+      <div class="field">
+        <label>آدرس API</label>
+        <input class="ltr" id="apiUrl" placeholder="https://muddy-finova-5405.amineshgi-1386.workers.dev" />
+      </div>
+      <div class="field">
+        <label>رمز ادمین (ADMIN_SECRET)</label>
+        <input type="password" id="adminSecret" placeholder="رمز Secret" />
+      </div>
+      <button class="btn btn-primary" id="loginBtn">ورود به پنل</button>
+      <div class="err-msg" id="loginErr"></div>
+    </div>
+  </div>
+
+  <div id="mainScreen" class="wrap" style="display:none">
+    <header>
+      <div class="left">
+        <div class="brand-ico" style="width:38px;height:38px;font-size:1.1rem;border-radius:12px">◈</div>
+        <div><h1>فینوا ادمین</h1></div>
+        <span class="badge">متصل</span>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-ghost btn-sm" id="refreshAllBtn">↻ بروزرسانی</button>
+        <button class="btn btn-ghost btn-sm" id="logoutBtn">خروج</button>
+      </div>
+    </header>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="create">🔑 ساخت توکن</button>
+      <button class="tab" data-tab="tokens">📋 توکن‌ها</button>
+      <button class="tab" data-tab="account">🔍 بررسی حساب</button>
+      <button class="tab" data-tab="pro">⭐ حساب‌های پرو</button>
+    </div>
+
+    <div class="panel active" id="panel-create">
+      <div class="grid-2">
+        <div class="card">
+          <h2>🔑 صدور توکن جدید</h2>
+          <div class="field">
+            <label>کد حساب کاربر <span class="req">*</span></label>
+            <input class="ltr" id="accCode" placeholder="FN-XXXXXX" maxlength="24" />
+            <p class="hint">اجباری — توکن فقط روی همین حساب فعال می‌شود</p>
+          </div>
+          <div class="field">
+            <label>مدت اعتبار</label>
+            <div class="chips" id="dayChips">
+              <button type="button" class="chip" data-days="7">۷ روز</button>
+              <button type="button" class="chip" data-days="15">۱۵ روز</button>
+              <button type="button" class="chip active" data-days="30">۳۰ روز</button>
+              <button type="button" class="chip" data-days="0">نامحدود</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>توضیح / نام مشتری</label>
+            <input id="note" placeholder="مثلاً علی — خرید از اینستاگرام" />
+          </div>
+          <div class="row" style="margin-top:8px">
+            <div class="field" style="max-width:100px">
+              <label>تعداد</label>
+              <input type="number" id="tokCount" value="1" min="1" max="20" />
+            </div>
+            <button class="btn btn-gold" id="genBtn" style="flex:1;height:46px">ساخت و ثبت در سرور</button>
+          </div>
+          <div id="genResult"></div>
+        </div>
+
+        <div class="card">
+          <h2>✅ بررسی سریع توکن</h2>
+          <div class="field">
+            <label>توکن</label>
+            <input class="ltr" id="checkTok" placeholder="PXXX-XXXX-XXXX-XXXX" />
+          </div>
+          <button class="btn btn-primary btn-block" id="checkBtn" style="margin-top:4px">بررسی وضعیت</button>
+          <div id="checkResult" style="margin-top:14px"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-tokens">
+      <div class="card">
+        <div class="toolbar">
+          <h2 style="margin:0">📋 همه توکن‌ها</h2>
+          <div class="right">
+            <button class="btn btn-ghost btn-sm filter-btn active" data-filter="all">همه</button>
+            <button class="btn btn-ghost btn-sm filter-btn" data-filter="free">آزاد</button>
+            <button class="btn btn-ghost btn-sm filter-btn" data-filter="used">استفاده‌شده</button>
+            <button class="btn btn-ghost btn-sm filter-btn" data-filter="disabled">غیرفعال</button>
+            <button class="btn btn-ghost btn-sm" id="copyFreeBtn">کپی آزادها</button>
+          </div>
+        </div>
+        <div class="stats" id="tokenStats"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>توکن</th>
+                <th>حساب</th>
+                <th>مدت</th>
+                <th>وضعیت</th>
+                <th>توضیح</th>
+                <th>ساخت</th>
+                <th>استفاده</th>
+                <th>عملیات</th>
+              </tr>
+            </thead>
+            <tbody id="tokBody"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="tokEmpty" style="display:none">توکنی یافت نشد</div>
+        <p class="hint">
+          <b>غیرفعال:</b> توکن باطل می‌شود ولی در لیست می‌ماند (قابل فعال‌سازی مجدد اگر هنوز مصرف نشده).<br>
+          <b>حذف:</b> توکن برای همیشه از سرور پاک می‌شود.
+        </p>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-account">
+      <div class="card">
+        <h2>🔍 بررسی کد حساب</h2>
+        <div class="row">
+          <div class="field">
+            <label>کد حساب شخصی</label>
+            <input class="ltr" id="lookupAcc" placeholder="FN-XXXXXX" />
+          </div>
+          <button class="btn btn-primary" id="lookupBtn" style="height:46px;min-width:120px">جستجو</button>
+        </div>
+        <div id="lookupResult"></div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-pro">
+      <div class="card">
+        <div class="toolbar">
+          <h2 style="margin:0">⭐ حساب‌های ارتقایافته به پرو</h2>
+          <button class="btn btn-ghost btn-sm" id="refreshProBtn">↻</button>
+        </div>
+        <div class="stats" id="proStats"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>کد حساب</th>
+                <th>تعداد فعال‌سازی</th>
+                <th>مجموع روز</th>
+                <th>اولین</th>
+                <th>آخرین</th>
+              </tr>
+            </thead>
+            <tbody id="proBody"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="proEmpty" style="display:none">هنوز کسی توکن فعال نکرده</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm modal -->
+  <div class="modal-bg" id="confirmModal">
+    <div class="modal">
+      <h3 id="confirmTitle">تأیید</h3>
+      <p id="confirmMsg"></p>
+      <div class="btns">
+        <button class="btn btn-ghost btn-sm" id="confirmCancel">انصراف</button>
+        <button class="btn btn-danger btn-sm" id="confirmOk">تأیید</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const CFG_KEY = 'finova_admin_cfg_v3';
+    let cfg = {};
+    let selectedDays = 30;
+    let currentFilter = 'all';
+    let lastTokens = [];
+    let confirmAction = null;
+
+    try { cfg = JSON.parse(localStorage.getItem(CFG_KEY) || '{}'); } catch (e) { cfg = {}; }
+    function saveCfg() { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
+
+    function toast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => el.classList.remove('show'), 2500);
+    }
+
+    function esc(s) {
+      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function faDate(ts) {
+      if (!ts) return '—';
+      try {
+        return new Date(ts).toLocaleString('fa-IR', {
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit'
+        });
+      } catch (e) { return '—'; }
+    }
+
+    function copyText(s) {
+      navigator.clipboard.writeText(s).then(() => toast('کپی شد ✅')).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = s; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); toast('کپی شد ✅'); } catch (e) { toast('کپی نشد'); }
+        ta.remove();
+      });
+    }
+
+    async function api(path, body) {
+      const base = (cfg.apiUrl || '').replace(/\/+$/, '');
+      if (!base) throw new Error('آدرس API تنظیم نشده');
+      const r = await fetch(base + path, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Admin-Secret': cfg.secret || '',
+        },
+        body: JSON.stringify(body || {}),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok && data.msg) throw new Error(data.msg);
+      if (!r.ok) throw new Error('خطای سرور ' + r.status);
+      if (data.ok === false && data.msg) throw new Error(data.msg);
+      return data;
+    }
+
+    function askConfirm(title, msg, okLabel, okClass) {
+      return new Promise(resolve => {
+        document.getElementById('confirmTitle').textContent = title;
+        document.getElementById('confirmMsg').textContent = msg;
+        const okBtn = document.getElementById('confirmOk');
+        okBtn.textContent = okLabel || 'تأیید';
+        okBtn.className = 'btn btn-sm ' + (okClass || 'btn-danger');
+        document.getElementById('confirmModal').classList.add('show');
+        confirmAction = resolve;
+      });
+    }
+
+    document.getElementById('confirmCancel').onclick = () => {
+      document.getElementById('confirmModal').classList.remove('show');
+      if (confirmAction) confirmAction(false);
+      confirmAction = null;
+    };
+    document.getElementById('confirmOk').onclick = () => {
+      document.getElementById('confirmModal').classList.remove('show');
+      if (confirmAction) confirmAction(true);
+      confirmAction = null;
+    };
+
+    /* Login */
+    document.getElementById('apiUrl').value = cfg.apiUrl || 'https://muddy-finova-5405.amineshgi-1386.workers.dev';
+    document.getElementById('adminSecret').value = cfg.secret || '';
+
+    document.getElementById('loginBtn').onclick = async () => {
+      const apiUrl = document.getElementById('apiUrl').value.trim().replace(/\/+$/, '');
+      const secret = document.getElementById('adminSecret').value;
+      const err = document.getElementById('loginErr');
+      err.textContent = '';
+      if (!apiUrl) { err.textContent = 'آدرس API را وارد کن'; return; }
+      if (!secret) { err.textContent = 'رمز ادمین را وارد کن'; return; }
+      cfg = { apiUrl, secret };
+      saveCfg();
+      try {
+        const h = await fetch(apiUrl + '/health').then(r => r.json());
+        if (!h.ok) throw new Error('API پاسخ نداد');
+        await api('/admin/list', {});
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('mainScreen').style.display = 'block';
+        toast('خوش آمدی 👋');
+        loadTokens();
+        loadPro();
+      } catch (e) {
+        err.textContent = e.message || 'اتصال برقرار نشد';
+      }
+    };
+
+    document.getElementById('logoutBtn').onclick = () => location.reload();
+
+    /* Tabs */
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.onclick = () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+        if (tab.dataset.tab === 'tokens') loadTokens();
+        if (tab.dataset.tab === 'pro') loadPro();
+      };
+    });
+
+    /* Day chips */
+    document.querySelectorAll('#dayChips .chip').forEach(chip => {
+      chip.onclick = () => {
+        document.querySelectorAll('#dayChips .chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        selectedDays = parseInt(chip.dataset.days, 10);
+      };
+    });
+
+    /* Generate */
+    document.getElementById('genBtn').onclick = async () => {
+      const btn = document.getElementById('genBtn');
+      const account = document.getElementById('accCode').value.trim().toUpperCase();
+      const note = document.getElementById('note').value.trim();
+      const count = Math.min(20, Math.max(1, parseInt(document.getElementById('tokCount').value, 10) || 1));
+      if (!account || account.length < 4) {
+        toast('کد حساب الزامی است');
+        document.getElementById('accCode').focus();
+        return;
+      }
+      btn.disabled = true;
+      try {
+        const r = await api('/admin/create', { account, days: selectedDays, note, count });
+        const tokens = (r.tokens || []).map(t => t.token || t);
+        const label = selectedDays === 0 ? 'نامحدود' : selectedDays + ' روز';
+        document.getElementById('genResult').innerHTML = `
+          <div class="token-out">
+            <div class="tok">${tokens.map(t => esc(t)).join('<br>')}</div>
+            <div class="meta">${tokens.length} توکن • ${esc(label)} • حساب: <b dir="ltr">${esc(account)}</b></div>
+            <button class="btn btn-ghost btn-sm" style="margin-top:12px" id="copyNewBtn">📋 کپی توکن‌ها</button>
+          </div>`;
+        document.getElementById('copyNewBtn').onclick = () => copyText(tokens.join('\n'));
+        toast(tokens.length + ' توکن ساخته شد');
+        loadTokens();
+      } catch (e) {
+        toast('خطا: ' + e.message);
+      }
+      btn.disabled = false;
+    };
+
+    /* Check */
+    document.getElementById('checkBtn').onclick = async () => {
+      const token = document.getElementById('checkTok').value.trim();
+      const box = document.getElementById('checkResult');
+      if (!token) { box.innerHTML = '<span style="color:var(--err)">توکن را وارد کن</span>'; return; }
+      try {
+        const base = (cfg.apiUrl || '').replace(/\/+$/, '');
+        const r = await fetch(base + '/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        }).then(x => x.json());
+        if (r.valid && !r.used && !r.disabled) {
+          box.innerHTML = `
+            <div style="color:var(--ok);font-weight:800">✅ ${esc(r.msg)}</div>
+            <div class="hint" style="margin-top:6px">
+              مدت: <b>${esc(r.daysLabel || (r.days === 0 ? 'نامحدود' : r.days + ' روز'))}</b>
+              ${r.account ? ' • حساب: <b dir="ltr">' + esc(r.account) + '</b>' : ''}
+            </div>`;
+        } else {
+          box.innerHTML = `
+            <div style="color:var(--err);font-weight:800">❌ ${esc(r.msg || 'نامعتبر')}</div>
+            ${r.account ? '<div class="hint">حساب: <span dir="ltr">' + esc(r.account) + '</span></div>' : ''}`;
+        }
+      } catch (e) {
+        box.innerHTML = `<div style="color:var(--err)">خطا: ${esc(e.message)}</div>`;
+      }
+    };
+
+    /* Tokens list */
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+      btn.onclick = () => {
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentFilter = btn.dataset.filter;
+        loadTokens();
+      };
+    });
+
+    async function loadTokens() {
+      try {
+        const r = await api('/admin/list', { filter: currentFilter });
+        lastTokens = r.tokens || [];
+        renderTokens(lastTokens);
+      } catch (e) {
+        toast('خطا در لیست: ' + e.message);
+      }
+    }
+
+    function statusPill(item) {
+      if (item.disabled) return '<span class="pill pill-warn">غیرفعال</span>';
+      if (item.usedAt) return '<span class="pill pill-err">استفاده‌شده</span>';
+      return '<span class="pill pill-ok">آزاد</span>';
+    }
+
+    function renderTokens(list) {
+      const body = document.getElementById('tokBody');
+      const empty = document.getElementById('tokEmpty');
+      body.innerHTML = '';
+
+      const freeN = list.filter(t => !t.usedAt && !t.disabled).length;
+      const usedN = list.filter(t => t.usedAt).length;
+      const disN = list.filter(t => t.disabled).length;
+      document.getElementById('tokenStats').innerHTML = `
+        <div class="stat"><div class="n">${list.length}</div><div class="l">نمایش</div></div>
+        <div class="stat"><div class="n">${freeN}</div><div class="l">آزاد</div></div>
+        <div class="stat"><div class="n">${usedN}</div><div class="l">استفاده‌شده</div></div>
+        <div class="stat"><div class="n">${disN}</div><div class="l">غیرفعال</div></div>`;
+
+      if (!list.length) { empty.style.display = 'block'; return; }
+      empty.style.display = 'none';
+
+      list.forEach((item, i) => {
+        const daysTxt = item.daysLabel || (item.days === 0 ? 'نامحدود' : (item.days || 30) + ' روز');
+        let actions = `<button class="btn btn-ghost btn-sm" data-copy="${esc(item.token)}">کپی</button>`;
+        if (!item.usedAt) {
+          if (item.disabled) {
+            actions += ` <button class="btn btn-ok btn-sm" data-enable="${esc(item.token)}">فعال</button>`;
+          } else {
+            actions += ` <button class="btn btn-warn btn-sm" data-disable="${esc(item.token)}">غیرفعال</button>`;
+          }
+        }
+        actions += ` <button class="btn btn-danger btn-sm" data-delete="${esc(item.token)}">حذف</button>`;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${i + 1}</td>
+          <td class="tok-cell">${esc(item.token)}</td>
+          <td dir="ltr">${esc(item.account || '—')}</td>
+          <td><span class="pill pill-gold">${esc(daysTxt)}</span></td>
+          <td>${statusPill(item)}</td>
+          <td>${esc(item.note || '—')}</td>
+          <td>${faDate(item.createdAt)}</td>
+          <td>${faDate(item.usedAt)}</td>
+          <td class="actions-cell">${actions}</td>`;
+        body.appendChild(tr);
+      });
+
+      body.querySelectorAll('[data-copy]').forEach(b => {
+        b.onclick = () => copyText(b.getAttribute('data-copy'));
+      });
+      body.querySelectorAll('[data-disable]').forEach(b => {
+        b.onclick = () => doDisable(b.getAttribute('data-disable'));
+      });
+      body.querySelectorAll('[data-enable]').forEach(b => {
+        b.onclick = () => doEnable(b.getAttribute('data-enable'));
+      });
+      body.querySelectorAll('[data-delete]').forEach(b => {
+        b.onclick = () => doDelete(b.getAttribute('data-delete'));
+      });
+    }
+
+    async function doDisable(token) {
+      const ok = await askConfirm('غیرفعال کردن توکن', 'توکن «' + token + '» غیرفعال شود؟ دیگر در اپ قابل استفاده نخواهد بود.', 'غیرفعال کن', 'btn-warn');
+      if (!ok) return;
+      try {
+        await api('/admin/disable', { token });
+        toast('توکن غیرفعال شد');
+        loadTokens();
+      } catch (e) { toast('خطا: ' + e.message); }
+    }
+
+    async function doEnable(token) {
+      const ok = await askConfirm('فعال‌سازی مجدد', 'توکن «' + token + '» دوباره آزاد شود؟', 'فعال کن', 'btn-ok');
+      if (!ok) return;
+      try {
+        await api('/admin/enable', { token });
+        toast('توکن دوباره فعال شد');
+        loadTokens();
+      } catch (e) { toast('خطا: ' + e.message); }
+    }
+
+    async function doDelete(token) {
+      const ok = await askConfirm('حذف دائمی توکن', 'توکن «' + token + '» برای همیشه از سرور حذف شود؟ این عمل برگشت‌ناپذیر است.', 'حذف کن', 'btn-danger');
+      if (!ok) return;
+      try {
+        await api('/admin/delete', { token });
+        toast('توکن حذف شد');
+        loadTokens();
+      } catch (e) { toast('خطا: ' + e.message); }
+    }
+
+    document.getElementById('copyFreeBtn').onclick = () => {
+      const free = lastTokens.filter(t => !t.usedAt && !t.disabled).map(t => t.token);
+      if (!free.length) { toast('توکن آزادی نیست'); return; }
+      copyText(free.join('\n'));
+    };
+
+    /* Account lookup */
+    document.getElementById('lookupBtn').onclick = doLookup;
+    document.getElementById('lookupAcc').onkeydown = e => { if (e.key === 'Enter') doLookup(); };
+
+    async function doLookup() {
+      const account = document.getElementById('lookupAcc').value.trim().toUpperCase();
+      const box = document.getElementById('lookupResult');
+      if (!account) { toast('کد حساب را وارد کن'); return; }
+      try {
+        const r = await api('/admin/account', { account });
+        const s = r.stats || {};
+        const daysTxt = s.hasUnlimited ? 'نامحدود' :
+          (s.totalDaysGranted > 0 ? s.totalDaysGranted + ' روز' : '—');
+        box.innerHTML = `
+          <div class="account-card">
+            <div class="code">${esc(r.account)}</div>
+            <div class="stats" style="margin-bottom:12px">
+              <div class="stat"><div class="n">${s.issued || 0}</div><div class="l">صادر شده</div></div>
+              <div class="stat"><div class="n">${s.free || 0}</div><div class="l">آزاد</div></div>
+              <div class="stat"><div class="n">${s.used || 0}</div><div class="l">مصرف‌شده</div></div>
+              <div class="stat"><div class="n">${s.disabled || 0}</div><div class="l">غیرفعال</div></div>
+              <div class="stat"><div class="n">${esc(String(daysTxt))}</div><div class="l">مجموع اعتبار</div></div>
+              <div class="stat"><div class="n" style="font-size:.9rem">${faDate(s.lastActivate)}</div><div class="l">آخرین فعال‌سازی</div></div>
+            </div>
+            ${(r.tokens && r.tokens.length) ? `
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>توکن</th><th>مدت</th><th>وضعیت</th><th>ساخت</th><th>استفاده</th></tr></thead>
+                  <tbody>
+                    ${r.tokens.map(t => `
+                      <tr>
+                        <td class="tok-cell">${esc(t.token)}</td>
+                        <td><span class="pill pill-gold">${esc(t.daysLabel || (t.days === 0 ? 'نامحدود' : t.days + ' روز'))}</span></td>
+                        <td>${statusPill(t)}</td>
+                        <td>${faDate(t.createdAt)}</td>
+                        <td>${faDate(t.usedAt)}</td>
+                      </tr>`).join('')}
+                  </tbody>
+                </table>
+              </div>` : '<div class="empty">توکنی برای این حساب ثبت نشده</div>'}
+          </div>`;
+      } catch (e) {
+        box.innerHTML = `<div style="color:var(--err);margin-top:12px">${esc(e.message)}</div>`;
+      }
+    }
+
+    /* Pro */
+    async function loadPro() {
+      try {
+        const r = await api('/admin/pro', {});
+        const list = r.accounts || [];
+        document.getElementById('proStats').innerHTML = `
+          <div class="stat"><div class="n">${list.length}</div><div class="l">حساب یکتا</div></div>
+          <div class="stat"><div class="n">${list.reduce((a, x) => a + (x.activations || 0), 0)}</div><div class="l">کل فعال‌سازی</div></div>`;
+        const body = document.getElementById('proBody');
+        const empty = document.getElementById('proEmpty');
+        body.innerHTML = '';
+        if (!list.length) { empty.style.display = 'block'; return; }
+        empty.style.display = 'none';
+        list.forEach((a, i) => {
+          const daysTxt = a.hasUnlimited ? 'نامحدود' : ((a.totalDays || 0) + ' روز');
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${i + 1}</td>
+            <td dir="ltr" style="font-family:ui-monospace,monospace;color:var(--accent2);font-weight:700">${esc(a.account)}</td>
+            <td>${a.activations}</td>
+            <td><span class="pill pill-gold">${esc(daysTxt)}</span></td>
+            <td>${faDate(a.firstAt)}</td>
+            <td>${faDate(a.lastAt)}</td>`;
+          body.appendChild(tr);
+        });
+      } catch (e) {
+        toast('خطا: ' + e.message);
+      }
+    }
+
+    document.getElementById('refreshProBtn').onclick = loadPro;
+    document.getElementById('refreshAllBtn').onclick = () => {
+      loadTokens();
+      loadPro();
+      toast('بروز شد');
+    };
+  </script>
+</body>
+</html>
