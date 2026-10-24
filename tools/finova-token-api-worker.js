@@ -1,5 +1,5 @@
 /**
- * فینوا — API (Cloudflare Worker) v4
+ * فینوا — API (Cloudflare Worker) v5
  * Variables: ADMIN_SECRET (Secret)
  * Bindings: TOKENS (KV Namespace)
  *
@@ -107,7 +107,7 @@ export default {
     const path = url.pathname.replace(/\/+$/, '') || '/';
 
     if (path === '/' || path === '/health') {
-      return json({ ok: true, service: 'finova-token-api', version: 4 });
+      return json({ ok: true, service: 'finova-token-api', version: 5 });
     }
 
     let body = {};
@@ -324,6 +324,54 @@ export default {
       return json({ ok: true, valid: true, used: false, disabled: false, msg: 'آزاد و معتبر', account: record.account || null, days: record.days, daysLabel: daysLabel(record.days) });
     }
 
+
+    // ═══════════ SYNC داده حساب ═══════════
+    if (path === '/sync/upload' && request.method === 'POST') {
+      const code = String(body.code || '').trim().toUpperCase();
+      const passHash = String(body.passHash || '');
+      if (!code || !passHash) return json({ ok: false, msg: 'کد حساب یا رمز ناقص است' });
+      const user = await findUserByCode(env, code);
+      if (!user) return json({ ok: false, msg: 'حساب در سرور ثبت نشده — یک‌بار با اینترنت ثبت‌نام/ورود کن' });
+      if (user.passHash !== passHash) return json({ ok: false, msg: 'احراز هویت ناموفق' });
+      const blob = body.blob;
+      if (!blob || typeof blob !== 'object') return json({ ok: false, msg: 'داده نامعتبر است' });
+      const savedAt = body.savedAt || blob.savedAt || Date.now();
+      // محدودیت تقریبی حجم (KV)
+      const packed = JSON.stringify({ savedAt, blob });
+      if (packed.length > 20 * 1024 * 1024) {
+        return json({ ok: false, msg: 'حجم داده بیش از حد مجاز است' });
+      }
+      await env.TOKENS.put('blob:' + code, packed);
+      // اسنپ‌شات پرو روی پروفایل کاربر
+      try {
+        if (blob.state && blob.state.pro) {
+          user.proSnapshot = blob.state.pro;
+          user.trialStart = blob.state.trialStart || 0;
+          user.quotaSnapshot = blob.state.quota || null;
+          await env.TOKENS.put('user:' + code, JSON.stringify(user));
+        }
+      } catch (e) {}
+      return json({ ok: true, msg: 'همگام‌سازی شد', savedAt });
+    }
+
+    if (path === '/sync/download' && request.method === 'POST') {
+      const code = String(body.code || '').trim().toUpperCase();
+      const passHash = String(body.passHash || '');
+      if (!code || !passHash) return json({ ok: false, msg: 'کد حساب یا رمز ناقص است' });
+      const user = await findUserByCode(env, code);
+      if (!user) return json({ ok: false, msg: 'حساب در سرور یافت نشد' });
+      if (user.passHash !== passHash) return json({ ok: false, msg: 'احراز هویت ناموفق' });
+      const raw = await env.TOKENS.get('blob:' + code);
+      if (!raw) return json({ ok: true, empty: true, msg: 'هنوز داده‌ای در ابر نیست' });
+      try {
+        const parsed = JSON.parse(raw);
+        return json({ ok: true, savedAt: parsed.savedAt || 0, blob: parsed.blob });
+      } catch (e) {
+        return json({ ok: false, msg: 'خطا در خواندن داده ابری' });
+      }
+    }
+
     return json({ ok: false, msg: 'مسیر نامعتبر' }, 404);
+
   },
 };

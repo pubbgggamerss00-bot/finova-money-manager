@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.12.0';
+  const APP_VERSION = '1.13.0';
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -393,6 +393,60 @@ const App = (() => {
       return await apiPost('/auth/login', { name: name, pass: pass });
     } catch (e) { return { ok: false, msg: 'offline', offline: true }; }
   }
+  /* —— v1.13.0 — همگام‌سازی ابری داده‌ها: آپلود/دانلود خودکار اسنپ‌شات حساب از سرور —— */
+  function currentPassHash() {
+    try {
+      const code = state.account && state.account.code;
+      if (!code) return '';
+      const me = getRegistry().find(r => r.code === code);
+      return (me && me.passHash) || '';
+    } catch (e) { return ''; }
+  }
+  async function cloudUploadBlob() {
+    try {
+      if (!state.account || !state.account.code) return { ok: false };
+      const passHash = currentPassHash();
+      if (!passHash) return { ok: false, msg: 'no pass' };
+      const blob = {
+        state: JSON.parse(JSON.stringify(state)),
+        txs, rules, budgets, goals, wallets, categories,
+        savedAt: Date.now(),
+      };
+      return await apiPost('/sync/upload', {
+        code: state.account.code,
+        passHash,
+        blob,
+        savedAt: blob.savedAt,
+      }, 20000);
+    } catch (e) { return { ok: false, msg: 'offline', offline: true }; }
+  }
+  async function cloudDownloadBlob(code, passHash) {
+    try {
+      return await apiPost('/sync/download', { code, passHash }, 20000);
+    } catch (e) { return { ok: false, msg: 'offline', offline: true }; }
+  }
+  async function applyCloudBlob(blob) {
+    if (!blob || !blob.state) return false;
+    for (const s of ['transactions', 'rules', 'budgets', 'goals', 'wallets', 'categories']) {
+      try { await Store.clear(s); } catch (e) {}
+    }
+    txs = (blob.txs || []).map(normTx);
+    rules = (blob.rules || []).map(normRule);
+    budgets = blob.budgets || [];
+    goals = (blob.goals || []).map(normGoal);
+    wallets = blob.wallets && blob.wallets.length ? blob.wallets : DEF_WALLETS.slice();
+    categories = blob.categories && blob.categories.length ? blob.categories : DEF_CATEGORIES.slice();
+    await Store.bulkPut('transactions', txs);
+    await Store.bulkPut('rules', rules);
+    await Store.bulkPut('budgets', budgets);
+    await Store.bulkPut('goals', goals);
+    await Store.bulkPut('wallets', wallets);
+    await Store.bulkPut('categories', categories);
+    state = Object.assign(defaultState(), blob.state, { v: 2 });
+    await saveState();
+    await saveAccBlobLocalOnly();
+    return true;
+  }
   function copyText(s) {
     try { navigator.clipboard.writeText(s); } catch (e) {
       const ta = document.createElement('textarea'); ta.value = s; document.body.appendChild(ta); ta.select();
@@ -410,7 +464,7 @@ const App = (() => {
   function saveLogoutLog(l) { try { localStorage.setItem(LLOG_KEY, JSON.stringify(l)); } catch (e) {} }
   function accDataKey(code) { return 'accdata:' + code; }
   /* — سندیک کامل داده‌های حساب فعلی در kv — برای جداسازی داده‌ی هر حساب کاربری — */
-  async function saveAccBlob() {
+  async function saveAccBlobLocalOnly() {
     if (!state.account || !state.account.code) return;
     try {
       await Store.put('kv', {
@@ -418,6 +472,19 @@ const App = (() => {
         savedAt: Date.now(),
       }, accDataKey(state.account.code));
     } catch (e) { console.warn('accblob save fail', e); }
+  }
+  let cloudSyncTimer = null;
+  async function saveAccBlob() {
+    await saveAccBlobLocalOnly();
+    // همگام‌سازی ابری با تأخیر (کم‌کردن فشار شبکه)
+    if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
+    cloudSyncTimer = setTimeout(async () => {
+      cloudSyncTimer = null;
+      try {
+        const r = await cloudUploadBlob();
+        if (r && r.ok) console.log('cloud sync ok', r.savedAt);
+      } catch (e) { console.warn('cloud sync fail', e); }
+    }, 2500);
   }
   /* — بازگرداندن داده‌های یک حساب از سندیک (یا شروع تازه) + همگام‌سازی حافظه — */
   async function loadAccSession(reg, fresh) {
@@ -558,13 +625,29 @@ const App = (() => {
       } else if (simpleHash(pass + reg.salt) !== reg.passHash) { showErr('رمز حساب اشتباه است'); return; }
       err.textContent = '';
       setSession(reg.code);
-      await loadAccSession(reg, false);
+      // دریافت داده از ابر (اگر جدیدتر باشد جایگزین می‌شود)
+      let usedCloud = false;
+      try {
+        const dl = await cloudDownloadBlob(reg.code, reg.passHash);
+        if (dl && dl.ok && dl.blob && dl.blob.state) {
+          const localBlob = await Store.get('kv', accDataKey(reg.code));
+          const localAt = (localBlob && localBlob.savedAt) || 0;
+          const cloudAt = dl.savedAt || (dl.blob && dl.blob.savedAt) || 0;
+          if (cloudAt >= localAt) {
+            await applyCloudBlob(dl.blob);
+            usedCloud = true;
+          }
+        }
+      } catch (e) { console.warn('cloud download', e); }
+      if (!usedCloud) await loadAccSession(reg, false);
       if (!state.account) state.account = { name: reg.name, code: reg.code, createdAt: reg.createdAt || Date.now() };
       state.account.name = reg.name;
-      await saveState(); await saveAccBlob();
+      await saveState(); await saveAccBlobLocalOnly();
+      // بعد از ورود یک بار فوری آپلود کن تا گوشی مبدأ/مقصد هم‌تراز شوند
+      try { cloudUploadBlob(); } catch (e) {}
       sc.classList.add('hidden');
       unlocked = true;
-      UI.toast('خوش برگشتی ' + esc(reg.name) + ' 👋', 'ok');
+      UI.toast(usedCloud ? ('خوش برگشتی ' + esc(reg.name) + ' — داده از ابر بارگذاری شد ☁️') : ('خوش برگشتی ' + esc(reg.name) + ' 👋'), 'ok');
       if (state.lock && state.lock.enabled) showLock(); else afterUnlock();
     };
     document.getElementById('loginGoBtn').onclick = doLogin;
