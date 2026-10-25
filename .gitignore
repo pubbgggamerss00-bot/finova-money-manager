@@ -3,3 +3,4 @@ android/finova-key.jks
 *.apk.tmp
 android/*.apk
 *.idsig
+app.js.orig removed
