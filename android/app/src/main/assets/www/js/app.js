@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.13.0';
+  const APP_VERSION = '1.14.0';
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -2466,7 +2466,8 @@ const App = (() => {
       <h3>ثبت جدید</h3>
       <button class="sheet-item" data-add="income"><span class="si-ico">💰</span><span>درآمد</span></button>
       <button class="sheet-item" data-add="expense"><span class="si-ico">🧾</span><span>هزینه</span></button>
-      <button class="sheet-item" data-add="installment"><span class="si-ico">📅</span><span>قسط / پرداخت دوره‌ای</span></button>
+      <button class="sheet-item" data-add="installment"><span class="si-ico">📅</span><span>قسط ماهانه (دوره‌ای)</span></button>
+      <button class="sheet-item" data-add="inst_paid"><span class="si-ico">✅</span><span>قسط تکی پرداخت‌شده (گذشته)</span></button>
       <button class="sheet-item" data-add="budget"><span class="si-ico">🎯</span><span>بودجه دسته</span></button>
       <button class="sheet-item" data-add="goal"><span class="si-ico">🏆</span><span>هدف مالی</span></button>
     `);
@@ -2478,6 +2479,7 @@ const App = (() => {
       if (kind === 'income') txForm('income');
       if (kind === 'expense') txForm('expense');
       if (kind === 'installment') ruleForm();
+      if (kind === 'inst_paid') txForm('installment');
       if (kind === 'budget') budgetForm();
       if (kind === 'goal') goalForm();
     });
@@ -2487,34 +2489,59 @@ const App = (() => {
   function txForm(type, preset) {
     const t = jToday();
     const isInc = type === 'income';
+    const isInst = type === 'installment';
     const cats = categories.filter(c => isInc ? c.type === 'income' : c.type !== 'income');
-    UI.modal(isInc ? '💰 ثبت درآمد' : '🧾 ثبت هزینه', `
-      <div class="field"><label>عنوان</label><input id="txTitle" placeholder="${isInc ? 'مثلاً حقوق آبان' : 'مثلاً خرید هفتگی'}" value="${preset && preset.title || ''}"></div>
+    const title = isInc ? '💰 ثبت درآمد' : (isInst ? '📅 ثبت قسط (تکی)' : '🧾 ثبت هزینه');
+    const defaultDate = jKey(preset && preset.date || t);
+    UI.modal(title, `
+      <div class="field"><label>عنوان</label><input id="txTitle" placeholder="${isInc ? 'مثلاً حقوق آبان' : (isInst ? 'مثلاً قسط وام آبان' : 'مثلاً خرید هفتگی')}" value="${preset && preset.title || ''}"></div>
       <div class="field"><label>مبلغ (تومان)</label><input id="txAmount" type="number" dir="ltr" placeholder="0" value="${preset && preset.amount || ''}"></div>
-      <div class="field"><label>تاریخ (جلالی — سال/ماه/روز)</label><input id="txDate" dir="ltr" value="${jKey(preset && preset.date || t)}"></div>
+      <div class="field"><label>تاریخ (جلالی — سال/ماه/روز)</label>
+        <input id="txDate" dir="ltr" value="${defaultDate}" placeholder="1403/07/15">
+        <div class="seg" id="txDateQuick" style="margin-top:8px;flex-wrap:wrap;gap:6px">
+          <button type="button" data-d="0" class="on">امروز</button>
+          <button type="button" data-d="1">دیروز</button>
+          <button type="button" data-d="3">۳ روز پیش</button>
+          <button type="button" data-d="7">هفته پیش</button>
+        </div>
+        <p style="margin-top:6px;font-size:11px;color:var(--txt3);line-height:1.7">برای ثبت هزینه یا قسط گذشته، تاریخ را دستی بنویس یا از دکمه‌ها انتخاب کن</p>
+      </div>
+      ${isInst ? `<div class="field"><label>سررسید قسط (اختیاری — خالی = همان تاریخ بالا)</label><input id="txDue" dir="ltr" placeholder="1403/07/01"></div>` : ''}
       <div class="field-inline">
         <div class="field"><label>دسته</label><select id="txCat">${cats.map(c => `<option value="${c.id}" ${preset && preset.categoryId === c.id ? 'selected' : ''}>${c.icon} ${esc(c.name)}</option>`).join('')}</select></div>
         <div class="field"><label>کیف پول</label><select id="txWallet">${wallets.map(w => `<option value="${w.id}">${esc(w.name)}</option>`).join('')}</select></div>
       </div>
       ${!isInc ? `<div class="field"><label>اولویت (۱ = مهم‌ترین)</label><div class="seg" id="txPri">${[1,2,3,4,5].map(p => `<button data-p="${p}" class="${(preset && preset.priority || 3) === p ? 'on' : ''}">${faDigits(p)}</button>`).join('')}</div></div>
-      <div class="switch-row"><span>هزینه ضروری (مسکن، خوراک، قبض…)</span><label class="switch"><input type="checkbox" id="txEss" ${preset && preset.essential ? 'checked' : ''}><span class="sw"></span></label></div>` : ''}
+      <div class="switch-row"><span>${isInst ? 'قسط ضروری' : 'هزینه ضروری (مسکن، خوراک، قبض…)'}</span><label class="switch"><input type="checkbox" id="txEss" ${preset && preset.essential ? 'checked' : (isInst ? 'checked' : '')}><span class="sw"></span></label></div>` : ''}
       <div class="field"><label>برچسب‌ها (با ویرگول)</label><input id="txTags" placeholder="مثلاً ضروری، خانه"></div>
       <div class="field"><label>یادداشت</label><textarea id="txNote" rows="2" placeholder="اختیاری"></textarea></div>
-      ${!isInc ? `<div class="field"><label>📎 تصویر رسید (اختیاری)</label><input id="txReceipt" type="file" accept="image/*"></div>` : ''}
-      <button class="btn full" id="txSaveBtn">${isInc ? 'ثبت درآمد' : 'ثبت هزینه'}</button>
+      ${!isInc && !isInst ? `<div class="field"><label>📎 تصویر رسید (اختیاری)</label><input id="txReceipt" type="file" accept="image/*"></div>` : ''}
+      <button class="btn full" id="txSaveBtn">${isInc ? 'ثبت درآمد' : (isInst ? 'ثبت قسط پرداخت‌شده' : 'ثبت هزینه')}</button>
     `);
     let pri = (preset && preset.priority) || 3;
     const priEl = document.getElementById('txPri');
     if (priEl) priEl.onclick = e => { const b = e.target.closest('[data-p]'); if (!b) return; pri = +b.dataset.p; [...priEl.children].forEach(x => x.classList.toggle('on', x === b)); };
+    const dq = document.getElementById('txDateQuick');
+    if (dq) dq.onclick = e => {
+      const b = e.target.closest('[data-d]'); if (!b) return;
+      const n = +b.dataset.d || 0;
+      document.getElementById('txDate').value = jKey(jDaysAgo(n));
+      [...dq.querySelectorAll('button')].forEach(x => x.classList.toggle('on', x === b));
+    };
     document.getElementById('txSaveBtn').onclick = async () => {
       const title = document.getElementById('txTitle').value.trim();
       const amount = +enDigits(document.getElementById('txAmount').value);
-      const jdate = enDigits(document.getElementById('txDate').value).replace(/[^0-9/]/g, '');
+      const jdate = normalizeJDate(document.getElementById('txDate').value);
       if (!title) return UI.toast('عنوان را وارد کنید', 'warn');
       if (!amount || amount <= 0) return UI.toast('مبلغ معتبر وارد کنید', 'warn');
-      if (!/^\d{4}\/\d{2}(\/\d{2})?$/.test(jdate)) return UI.toast('تاریخ را به شکل ۱۴۰۳/۰۹/۱۵ وارد کنید', 'warn');
-      // حالت سختگیرانه برای هزینه غیرضروری
-      if (!isInc) {
+      if (!jdate) return UI.toast('تاریخ نامعتبر است — مثال: ۱۴۰۳/۰۷/۱۵', 'warn');
+      let dueJdate = null;
+      if (isInst) {
+        const dueRaw = (document.getElementById('txDue') && document.getElementById('txDue').value) || '';
+        dueJdate = dueRaw.trim() ? normalizeJDate(dueRaw) : jdate;
+        if (dueRaw.trim() && !dueJdate) return UI.toast('تاریخ سررسید نامعتبر است', 'warn');
+      }
+      if (!isInc && !isInst) {
         const ess = document.getElementById('txEss') && document.getElementById('txEss').checked;
         if (!ess) {
           const warn = strictCheck(amount);
@@ -2527,25 +2554,30 @@ const App = (() => {
       async function doSave(skip) {
         const receiptEl = document.getElementById('txReceipt');
         let receiptId = null;
-        if (receiptEl && receiptEl.files[0]) {
+        if (receiptEl && receiptEl.files && receiptEl.files[0]) {
           try {
             const f = receiptEl.files[0];
             const b64 = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.readAsDataURL(f); });
             receiptId = uid('rc');
-            await Store.put('receipts', { id: receiptId, mime: f.type, data: b64 }); // keyPath inline ('id')
+            await Store.put('receipts', { id: receiptId, mime: f.type, data: b64 });
           } catch (e) { console.warn('receipt', e); }
         }
         const tags = document.getElementById('txTags').value.split(/[,،]/).map(s => s.trim()).filter(Boolean);
         txs.push(normTx({
-          type, title, amount, jdate,
+          type: isInst ? 'installment' : type,
+          title, amount, jdate,
+          dueJdate: isInst ? (dueJdate || jdate) : null,
           categoryId: document.getElementById('txCat').value,
           walletId: document.getElementById('txWallet').value,
-          priority: pri, essential: document.getElementById('txEss') ? document.getElementById('txEss').checked : false,
-          tags, note: document.getElementById('txNote').value, status: 'paid', receiptId,
+          priority: pri,
+          essential: document.getElementById('txEss') ? document.getElementById('txEss').checked : false,
+          tags, note: document.getElementById('txNote').value,
+          status: 'paid',
+          receiptId,
         }));
         await persist('transactions');
         UI.closeModal();
-        UI.toast(isInc ? 'درآمد ثبت شد ✅' : 'هزینه ثبت شد ✅', 'ok');
+        UI.toast(isInc ? 'درآمد ثبت شد ✅' : (isInst ? 'قسط پرداخت‌شده ثبت شد ✅' : 'هزینه ثبت شد ✅'), 'ok');
         Bridge.vibrate(30);
         scheduleNotifications();
         render(curTab);
@@ -2579,10 +2611,16 @@ const App = (() => {
       // قسط با مبلغ متغیر (۰): قبل از پرداخت، مبلغ پرسیده شود (رفع باگ قسط ۰ تومانی)
       if (t.amount <= 0) {
         const v = await UI.prompt('مبلغ این قسط', 'مبلغ پرداخت‌شده این ماه را وارد کن (تومان):', 'number');
-        if (!v || !(+v > 0)) return;
-        t.amount = +v;
+        if (!v || !(+enDigits(v) > 0)) return;
+        t.amount = +enDigits(v);
       }
-      t.status = 'paid'; t.jdate = jKey(jToday()); // ماه گزارش = ماه واقعی پرداخت
+      // تاریخ پرداخت قابل تنظیم (گذشته هم مجاز)
+      const payDateRaw = await UI.prompt('تاریخ پرداخت (جلالی)', 'تاریخ پرداخت را وارد کن (خالی = امروز):', 'text', faDigits(jKey(jToday())));
+      let payDate = (payDateRaw && String(payDateRaw).trim()) ? normalizeJDate(payDateRaw) : jKey(jToday());
+      if (payDateRaw && String(payDateRaw).trim() && !payDate) return UI.toast('تاریخ پرداخت نامعتبر است', 'warn');
+      if (!payDate) payDate = jKey(jToday());
+      if (!t.dueJdate) t.dueJdate = t.jdate;
+      t.status = 'paid'; t.jdate = payDate;
       await persist('transactions');
       // کاهش «تعداد قسط مانده» و پایان خودکار قانون (رفع باگ نادیده‌گرفتن تعداد قسط)
       if (t.ruleId) {
@@ -2624,6 +2662,9 @@ const App = (() => {
         <div class="field"><label>روز ماه (جلالی)</label><input id="rDay" type="number" dir="ltr" value="1" min="1" max="31"></div>
         <div class="field"><label>تعداد قسط مانده (۰ = بی‌پایان)</label><input id="rRem" type="number" dir="ltr" value="0" min="0"></div>
       </div>
+      <div class="field"><label>ماه شروع (سال/ماه جلالی)</label><input id="rStartMk" dir="ltr" value="${jMonthKey(jToday())}" placeholder="1403/07"></div>
+      <div class="switch-row"><span>اقساط از ماه شروع تا الان را هم بساز</span><label class="switch"><input type="checkbox" id="rBackfill" checked><span class="sw"></span></label></div>
+      <div class="switch-row"><span>اقساط گذشته را پرداخت‌شده ثبت کن</span><label class="switch"><input type="checkbox" id="rBackPaid" checked><span class="sw"></span></label></div>
       <div class="field"><label>اولویت (۱ = مهم‌ترین)</label><div class="seg" id="rPri">${[1,2,3,4,5].map(p => `<button data-p="${p}" class="${p === 1 ? 'on' : ''}">${faDigits(p)}</button>`).join('')}</div></div>
       <div class="switch-row"><span>قسط ضروری</span><label class="switch"><input type="checkbox" id="rEss" checked><span class="sw"></span></label></div>
       <div class="field-inline">
@@ -2642,16 +2683,59 @@ const App = (() => {
       if (!document.getElementById('rVar').checked && amount <= 0) return UI.toast('مبلغ معتبر وارد کنید', 'warn');
       const isRent = title.includes('اجاره');
       const tj = jToday();
-      rules.push(normRule({
+      let startMk = jMonthKey(tj);
+      const startRaw = document.getElementById('rStartMk') && document.getElementById('rStartMk').value;
+      if (startRaw) {
+        const nd = normalizeJDate(startRaw.trim().length <= 7 ? (startRaw.trim() + '/01') : startRaw);
+        if (nd) startMk = nd.slice(0, 7);
+      }
+      const doBackfill = !!(document.getElementById('rBackfill') && document.getElementById('rBackfill').checked);
+      const backPaid = !!(document.getElementById('rBackPaid') && document.getElementById('rBackPaid').checked);
+      const rule = normRule({
         title, amount, day, priority: isRent ? 1 : pri, essential: isRent ? true : document.getElementById('rEss').checked,
         variable: document.getElementById('rVar').checked,
         categoryId: document.getElementById('rCat').value, walletId: document.getElementById('rWallet').value,
         remainingMonths: +document.getElementById('rRem').value || 0, active: true, lastKey: '',
-        createdMk: jMonthKey(tj), createdD: tj.jd,
-      }));
+        createdMk: startMk, createdD: 1,
+      });
+      rules.push(rule);
+      // ساخت اقساط از ماه شروع تا ماه جاری (گذشته = پرداخت‌شده در صورت انتخاب)
+      let made = 0;
+      if (doBackfill) {
+        let cur = parseJKey(startMk + '/01');
+        const endMk = jMonthKey(tj);
+        let guard = 0;
+        while (jMonthKey(cur) <= endMk && guard < 120) {
+          guard++;
+          const mk = jMonthKey(cur);
+          const maxD = Jalali.monthLength(cur.jy, cur.jm);
+          const d = Math.min(day, maxD);
+          const due = mk + '/' + String(d).padStart(2, '0');
+          const exists = txs.some(x => x.ruleId === rule.id && (x.jdate || '').startsWith(mk));
+          if (!exists) {
+            const isPast = mk < endMk || (mk === endMk && d < tj.jd);
+            const isCurrentDue = mk === endMk;
+            const paid = backPaid && isPast;
+            txs.push(normTx({
+              id: uid('tx'), type: 'installment', title: rule.title,
+              amount: rule.variable ? 0 : rule.amount, currency: 'TMN', rate: 1,
+              categoryId: rule.categoryId, walletId: rule.walletId,
+              jdate: paid ? due : due, dueJdate: due,
+              status: paid ? 'paid' : 'pending',
+              priority: rule.priority, essential: rule.essential, ruleId: rule.id, seq: made + 1,
+            }));
+            rule.lastKey = rule.id + '@' + mk;
+            rule.seq = made + 1;
+            made++;
+          }
+          cur = addJMonths(cur, 1);
+        }
+      }
       await persist('rules');
+      await persist('transactions');
       generateRecurring();
-      UI.closeModal(); UI.toast('قسط ماهانه ثبت شد ✅', 'ok');
+      UI.closeModal();
+      UI.toast(made ? ('قسط ماهانه ثبت شد + ' + faDigits(made) + ' قسط ساخته شد ✅') : 'قسط ماهانه ثبت شد ✅', 'ok');
       scheduleNotifications();
       render(curTab === 'installments' ? 'installments' : curTab);
     };
@@ -2690,8 +2774,8 @@ const App = (() => {
       const title = document.getElementById('gTitle').value.trim();
       const target = +enDigits(document.getElementById('gTarget').value) || 0;
       if (!title || target <= 0) return UI.toast('عنوان و مبلغ هدف را وارد کنید', 'warn');
-      let deadlineJ = enDigits(document.getElementById('gDead').value).replace(/[^0-9/]/g, '');
-      goals.push(normGoal({ title, target, saved: +enDigits(document.getElementById('gSaved').value) || 0, deadlineJ: /^\d{4}\/\d{2}(\/\d{2})?$/.test(deadlineJ) ? deadlineJ : null }));
+      let deadlineJ = normalizeJDate(document.getElementById('gDead').value);
+      goals.push(normGoal({ title, target, saved: +enDigits(document.getElementById('gSaved').value) || 0, deadlineJ: deadlineJ || null }));
       await persist('goals');
       UI.closeModal(); UI.toast('هدف ثبت شد 🏆', 'ok'); render(curTab === 'goals' ? 'goals' : curTab);
     };

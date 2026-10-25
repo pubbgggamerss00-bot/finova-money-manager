@@ -90,6 +90,27 @@ function jToday() { return Jalali.toJalali(new Date()); } // {jy,jm,jd}
 function jKey(t) { return t ? `${t.jy}/${String(t.jm).padStart(2,'0')}/${String(t.jd).padStart(2,'0')}` : ''; }
 function jMonthKey(t) { return t ? `${t.jy}/${String(t.jm).padStart(2,'0')}` : ''; }
 function parseJKey(k) { const p = enDigits(k).split('/').map(Number); return { jy: p[0], jm: p[1], jd: p[2] || 1 }; }
+/** نرمال‌سازی ورودی تاریخ جلالی کاربر → YYYY/MM/DD یا null */
+function normalizeJDate(raw) {
+  if (raw == null || raw === '') return null;
+  let s = enDigits(String(raw)).trim().replace(/[\-\.\s]+/g, '/').replace(/[^\d/]/g, '');
+  const parts = s.split('/').filter(Boolean);
+  if (parts.length < 2) return null;
+  let jy = parseInt(parts[0], 10);
+  let jm = parseInt(parts[1], 10);
+  let jd = parts.length >= 3 ? parseInt(parts[2], 10) : 1;
+  if (!jy || jy < 1300 || jy > 1500) return null;
+  if (!jm || jm < 1 || jm > 12) return null;
+  const maxD = Jalali.monthLength(jy, jm);
+  if (!jd || jd < 1) jd = 1;
+  if (jd > maxD) jd = maxD;
+  return jy + '/' + String(jm).padStart(2, '0') + '/' + String(jd).padStart(2, '0');
+}
+function jDaysAgo(n) {
+  const d = new Date(); d.setDate(d.getDate() - (n || 0));
+  return Jalali.toJalali(d);
+}
+
 function jDateLabel(k) {
   if (!k) return '—';
   const t = parseJKey(k);
