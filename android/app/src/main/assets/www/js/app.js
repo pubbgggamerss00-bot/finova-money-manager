@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.15.0';
+  const APP_VERSION = '1.16.0';
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -2026,6 +2026,16 @@ const App = (() => {
       ${!isPro() ? '<button class="btn-gold" id="proUpBtn" style="margin-top:12px">⭐ ارتقا به نسخه پرو</button>' : ''}
     </div>` : ''}
     ${acc ? `
+    <div class="card">
+      <div class="card-title">💬 پشتیبانی فینوا</div>
+      <p style="font-size:11.5px;color:var(--txt2);line-height:1.9;margin:0 0 12px">سوال داری یا مشکلی پیش آمده؟ با پشتیبانی چت کن یا تیکت ثبت کن — پاسخ از پنل ادمین می‌آید.</p>
+      <div class="btn-row">
+        <button class="btn" id="supportChatBtn" style="flex:1">💬 چت با پشتیبانی</button>
+        <button class="btn ghost" id="supportTicketBtn" style="flex:1">🎫 ثبت تیکت</button>
+      </div>
+      <button class="btn ghost full" id="supportHistoryBtn" style="margin-top:8px">📋 تاریخچه گفتگو و تیکت‌ها</button>
+    </div>` : ''}
+    ${acc ? `
     <div class="card logout-card">
       <div class="card-title">🚪 خروج از حساب</div>
       <p class="logout-limits">لیمیت خروج: هر حساب فقط <b>۱ بار</b> • روی هر گوشی فقط <b>۲ بار</b> • فاصله بین خروج‌ها <b>۲۴ ساعت</b><br>باقی‌مانده این حساب: <b>${faDigits(logoutLimits().accLeft)}</b> بار • باقی‌مانده این گوشی: <b>${faDigits(logoutLimits().devLeft)}</b> بار${logoutLimits().coolLeft > 0 ? '<br>زمان انتظار تا خروج بعدی: <b>' + faDigits(Math.max(1, Math.ceil(logoutLimits().coolLeft / 3600000))) + ' ساعت</b>' : ''}</p>
@@ -2382,6 +2392,9 @@ const App = (() => {
     if (t.closest('#rateMyketBtn')) return showRatingDialog('settings');
     // پرو و حساب
     if (t.closest('#proCta') || t.closest('#proUpBtn')) return showProModal('home');
+    if (t.closest('#supportChatBtn')) return supportStartChat();
+    if (t.closest('#supportTicketBtn')) return supportNewTicket();
+    if (t.closest('#supportHistoryBtn')) return supportHistory();
     if (t.closest('#logoutBtn')) return logoutConfirm();
     if (t.closest('#copyAccBtn')) return copyText(state.account ? state.account.code : '');
     // شخصی‌سازی — انتخاب تم
@@ -2926,6 +2939,214 @@ const App = (() => {
     const txt = `◈ گزارش مالی ${jMonthLabel()} — فینوا\n\nموجودی کل: ${fmtToman(walletBalance())}\nدرآمد: ${fmtToman(s.income)}\nهزینه: ${fmtToman(s.expense)}\nاقساط پرداختی: ${fmtToman(s.installPaid)}\nاقساط مانده: ${fmtToman(s.installPending)}\nامتیاز سلامت: ${faDigits(healthScore())}/۱۰۰\n\n${jDateLabel(jKey(jToday()))}`;
     Bridge.shareText(txt);
   }
+
+
+  /* ═══════════ پشتیبانی — چت و تیکت ═══════════ */
+  const SUPPORT_CATS = [
+    { id: 'technical', ico: '🛠️', t: 'مشکلات فنی', s: 'کرش، خطا، نمایش اشتباه' },
+    { id: 'payment', ico: '⭐', t: 'خرید و اشتراک پرو', s: 'توکن، فعال‌سازی، تمدید' },
+    { id: 'account', ico: '👤', t: 'حساب کاربری', s: 'ورود، رمز، کد حساب' },
+    { id: 'data', ico: '💾', t: 'پشتیبان و داده', s: 'بازیابی، همگام‌سازی ابری' },
+    { id: 'feature', ico: '💡', t: 'پیشنهاد و انتقاد', s: 'ایده برای بهبود اپ' },
+    { id: 'other', ico: '💬', t: 'سایر', s: 'موضوعات دیگر' },
+  ];
+  function supportAuthBody() {
+    const code = state.account && state.account.code;
+    const passHash = currentPassHash();
+    if (!code || !passHash) return null;
+    return { code, passHash, name: (state.account && state.account.name) || '' };
+  }
+  function supportStatusLabel(s) {
+    return ({ open: 'باز', reviewing: 'در حال بررسی', closed: 'بسته', answered: 'پاسخ‌داده‌شده' })[s] || s;
+  }
+  function supportStatusColor(s) {
+    return ({ open: 'var(--ok2)', reviewing: 'var(--warn2)', closed: 'var(--txt3)', answered: 'var(--acc)' })[s] || 'var(--txt2)';
+  }
+
+  function supportStartChat() {
+    const auth = supportAuthBody();
+    if (!auth) return UI.toast('ابتدا وارد حساب شو', 'warn');
+    UI.modal('💬 چت با پشتیبانی', `
+      <p style="font-size:12px;color:var(--txt2);line-height:1.9;margin:0 0 12px">اول مشخص کن در کدام بخش کمک می‌خواهی:</p>
+      <div style="display:grid;gap:8px" id="supCatGrid">
+        ${SUPPORT_CATS.map(c => `
+          <button class="btn ghost" data-cat="${c.id}" style="justify-content:flex-start;text-align:right;padding:12px 14px">
+            <span style="font-size:18px;margin-left:10px">${c.ico}</span>
+            <span><b>${c.t}</b><br><small style="color:var(--txt3)">${c.s}</small></span>
+          </button>`).join('')}
+      </div>
+    `);
+    document.getElementById('supCatGrid').onclick = async (e) => {
+      const b = e.target.closest('[data-cat]'); if (!b) return;
+      const category = b.dataset.cat;
+      UI.closeModal();
+      UI.toast('در حال اتصال به پشتیبانی…', 'ok');
+      try {
+        const r = await apiPost('/support/chat/start', { ...auth, category }, 15000);
+        if (!r || !r.ok) return UI.toast((r && r.msg) || 'اتصال برقرار نشد', 'bad');
+        openSupportChat(r.chat);
+      } catch (err) {
+        UI.toast('اینترنت لازم است', 'bad');
+      }
+    };
+  }
+
+  function openSupportChat(chat) {
+    const auth = supportAuthBody();
+    if (!auth || !chat) return;
+
+    const m = UI.modal('💬 پشتیبانی · ' + (chat.categoryLabel || ''), `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span class="badge" id="supStatus" style="background:rgba(0,0,0,.2);color:${supportStatusColor(chat.status)}">${supportStatusLabel(chat.status)}</span>
+        <button class="btn ghost" id="supRefresh" style="padding:6px 10px;font-size:11px">↻ بروزرسانی</button>
+      </div>
+      <div id="supMsgs" style="max-height:42vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:4px 0 12px;margin-bottom:8px"></div>
+      <div id="supLockNote" style="font-size:11px;color:var(--warn2);margin-bottom:8px;display:none">⏳ تا پاسخ پشتیبان نمی‌توانی پیام جدید بفرستی</div>
+      <div id="supClosedNote" style="font-size:11px;color:var(--txt3);margin-bottom:8px;display:none">این گفتگو بسته شده — از منوی پشتیبانی گفتگوی جدید شروع کن</div>
+      <div class="field" style="margin:0"><textarea id="supInput" rows="2" placeholder="پیامت را بنویس…"></textarea></div>
+      <button class="btn full" id="supSend" style="margin-top:8px">ارسال پیام</button>
+    `);
+
+    function isWaiting(c) {
+      if (c.status === 'closed') return false;
+      const lastReal = [...(c.messages || [])].reverse().find(x => !x.system);
+      return c.status === 'reviewing' && lastReal && lastReal.role === 'user';
+    }
+    function applyLock(c) {
+      const wait = isWaiting(c);
+      const closed = c.status === 'closed';
+      const badge = m.querySelector('#supStatus');
+      if (badge) { badge.textContent = supportStatusLabel(c.status); badge.style.color = supportStatusColor(c.status); }
+      const inp = m.querySelector('#supInput');
+      const btn = m.querySelector('#supSend');
+      if (inp) { inp.disabled = closed || wait; inp.placeholder = closed ? 'گفتگو بسته است' : 'پیامت را بنویس…'; }
+      if (btn) btn.disabled = closed || wait;
+      m.querySelector('#supLockNote').style.display = wait ? 'block' : 'none';
+      m.querySelector('#supClosedNote').style.display = closed ? 'block' : 'none';
+    }
+    function renderMsgs(c) {
+      const box = m.querySelector('#supMsgs');
+      if (!box) return;
+      box.innerHTML = (c.messages || []).map(msg => {
+        const mine = msg.role === 'user';
+        const sys = msg.system || msg.auto;
+        return `<div style="align-self:${mine ? 'flex-start' : 'flex-end'};max-width:88%;padding:10px 12px;border-radius:14px;font-size:12.5px;line-height:1.75;white-space:pre-wrap;background:${mine ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : (sys ? 'rgba(148,163,184,.12)' : 'rgba(255,255,255,.06)')};color:${mine ? '#fff' : 'var(--txt)'};border:${sys ? '1px dashed rgba(148,163,184,.3)' : 'none'}">${esc(msg.text)}<div style="font-size:9.5px;opacity:.65;margin-top:4px">${faDigits(new Date(msg.at).toLocaleString('fa-IR'))}${sys ? ' · سیستم' : ''}</div></div>`;
+      }).join('');
+      box.scrollTop = box.scrollHeight;
+    }
+    let current = chat;
+    renderMsgs(current);
+    applyLock(current);
+
+    async function refresh() {
+      try {
+        const r = await apiPost('/support/chat/get', { ...auth, chatId: current.id }, 12000);
+        if (r && r.ok && r.chat) {
+          current = r.chat;
+          renderMsgs(current);
+          applyLock(current);
+        }
+      } catch (e) {}
+    }
+    m.querySelector('#supRefresh').onclick = refresh;
+    const poll = setInterval(refresh, 8000);
+    const obs = new MutationObserver(() => { if (!document.body.contains(m)) { clearInterval(poll); obs.disconnect(); } });
+    obs.observe(document.body, { childList: true, subtree: true });
+
+    m.querySelector('#supSend').onclick = async () => {
+      const text = (m.querySelector('#supInput').value || '').trim();
+      if (!text) return;
+      m.querySelector('#supSend').disabled = true;
+      try {
+        const r = await apiPost('/support/chat/send', { ...auth, chatId: current.id, text }, 15000);
+        if (!r || !r.ok) {
+          UI.toast((r && r.msg) || 'ارسال نشد', 'bad');
+          applyLock(current);
+          return;
+        }
+        current = r.chat;
+        m.querySelector('#supInput').value = '';
+        renderMsgs(current);
+        applyLock(current);
+        UI.toast('پیام ارسال شد', 'ok');
+      } catch (e) {
+        UI.toast('خطای شبکه', 'bad');
+        applyLock(current);
+      }
+    };
+  }
+
+  function supportNewTicket() {
+    const auth = supportAuthBody();
+    if (!auth) return UI.toast('ابتدا وارد حساب شو', 'warn');
+    UI.modal('🎫 ثبت تیکت پشتیبانی', `
+      <div class="field"><label>دسته</label>
+        <select id="tkCat">${SUPPORT_CATS.map(c => `<option value="${c.id}">${c.ico} ${c.t}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>اولویت</label>
+        <select id="tkPri"><option value="low">کم</option><option value="normal" selected>عادی</option><option value="high">بالا</option></select>
+      </div>
+      <div class="field"><label>موضوع</label><input id="tkSub" maxlength="120" placeholder="خلاصه مشکل در یک خط"></div>
+      <div class="field"><label>شرح کامل</label><textarea id="tkBody" rows="4" placeholder="جزئیات را بنویس تا سریع‌تر کمکت کنیم…"></textarea></div>
+      <button class="btn full" id="tkGo">ارسال تیکت</button>
+    `);
+    document.getElementById('tkGo').onclick = async () => {
+      const subject = document.getElementById('tkSub').value.trim();
+      const body = document.getElementById('tkBody').value.trim();
+      const category = document.getElementById('tkCat').value;
+      const priority = document.getElementById('tkPri').value;
+      if (subject.length < 3) return UI.toast('موضوع را کامل‌تر بنویس', 'warn');
+      if (body.length < 10) return UI.toast('شرح را کامل‌تر بنویس', 'warn');
+      try {
+        const r = await apiPost('/support/ticket/create', { ...auth, category, subject, body, priority }, 15000);
+        if (!r || !r.ok) return UI.toast((r && r.msg) || 'ثبت نشد', 'bad');
+        UI.closeModal();
+        UI.toast('تیکت ثبت شد ✅', 'ok');
+      } catch (e) { UI.toast('اینترنت لازم است', 'bad'); }
+    };
+  }
+
+  async function supportHistory() {
+    const auth = supportAuthBody();
+    if (!auth) return UI.toast('ابتدا وارد حساب شو', 'warn');
+    UI.toast('در حال بارگذاری…', 'ok');
+    try {
+      const [ch, tk] = await Promise.all([
+        apiPost('/support/chat/mine', auth, 12000),
+        apiPost('/support/ticket/mine', auth, 12000),
+      ]);
+      const chats = (ch && ch.chats) || [];
+      const tickets = (tk && tk.tickets) || [];
+      const m = UI.modal('📋 تاریخچه پشتیبانی', `
+        <div class="card-title" style="margin-bottom:8px">چت‌ها (${faDigits(chats.length)})</div>
+        ${chats.length ? chats.map(c => `
+          <div class="card" style="padding:12px;margin-bottom:8px;cursor:pointer" data-open-chat="${c.id}">
+            <div style="display:flex;justify-content:space-between;gap:8px">
+              <b style="font-size:13px">${esc(c.categoryLabel || c.category)}</b>
+              <span style="font-size:11px;color:${supportStatusColor(c.status)}">${supportStatusLabel(c.status)}</span>
+            </div>
+            <div style="font-size:11px;color:var(--txt3);margin-top:4px">${faDigits(new Date(c.updatedAt).toLocaleString('fa-IR'))}</div>
+          </div>`).join('') : '<p style="color:var(--txt3);font-size:12px">هنوز چتی نداری</p>'}
+        <div class="card-title" style="margin:14px 0 8px">تیکت‌ها (${faDigits(tickets.length)})</div>
+        ${tickets.length ? tickets.map(t => `
+          <div class="card" style="padding:12px;margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;gap:8px">
+              <b style="font-size:13px">${esc(t.subject)}</b>
+              <span style="font-size:11px;color:${supportStatusColor(t.status)}">${supportStatusLabel(t.status)}</span>
+            </div>
+            <div style="font-size:11px;color:var(--txt3);margin-top:4px">${esc(t.categoryLabel || '')} · ${faDigits(new Date(t.updatedAt).toLocaleString('fa-IR'))}</div>
+            ${(t.replies && t.replies.length) ? `<div style="margin-top:8px;font-size:12px;line-height:1.7;padding:8px;background:rgba(255,255,255,.04);border-radius:10px"><b>پاسخ پشتیبانی:</b><br>${esc(t.replies[t.replies.length - 1].text)}</div>` : ''}
+          </div>`).join('') : '<p style="color:var(--txt3);font-size:12px">هنوز تیکتی نداری</p>'}
+      `);
+      m.querySelectorAll('[data-open-chat]').forEach(el => {
+        el.onclick = async () => {
+          const r = await apiPost('/support/chat/get', { ...auth, chatId: el.dataset.openChat }, 12000);
+          if (r && r.ok) { UI.closeModal(); openSupportChat(r.chat); }
+        };
+      });
+    } catch (e) { UI.toast('بارگذاری ناموفق', 'bad'); }
+  }
+
 
   /* ═══ ابزارها ═══ */
   function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }

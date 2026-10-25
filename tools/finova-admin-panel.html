@@ -300,6 +300,8 @@
       <button class="tab" data-tab="tokens">📋 توکن‌ها</button>
       <button class="tab" data-tab="account">🔍 بررسی حساب</button>
       <button class="tab" data-tab="pro">⭐ حساب‌های پرو</button>
+      <button class="tab" data-tab="chats">💬 چت پشتیبانی</button>
+      <button class="tab" data-tab="tickets">🎫 تیکت‌ها</button>
     </div>
 
     <div class="panel active" id="panel-create">
@@ -426,7 +428,78 @@
     </div>
   </div>
 
-  <!-- Confirm modal -->
+
+    <div class="panel" id="panel-chats">
+      <div class="card">
+        <div class="toolbar">
+          <h2 style="margin:0">💬 چت با کاربران</h2>
+          <div class="right">
+            <button class="btn btn-ghost btn-sm filter-chat active" data-cf="all">همه</button>
+            <button class="btn btn-ghost btn-sm filter-chat" data-cf="open">باز</button>
+            <button class="btn btn-ghost btn-sm filter-chat" data-cf="reviewing">در بررسی</button>
+            <button class="btn btn-ghost btn-sm filter-chat" data-cf="closed">بسته</button>
+            <button class="btn btn-ghost btn-sm" id="refreshChatsBtn">↻</button>
+          </div>
+        </div>
+        <div class="stats" id="chatStats"></div>
+        <div id="chatList"></div>
+        <div class="empty" id="chatEmpty" style="display:none">گفتگویی نیست</div>
+      </div>
+      <div class="card" id="chatDetail" style="display:none">
+        <div class="toolbar">
+          <h2 style="margin:0" id="chatDetailTitle">گفتگو</h2>
+          <div class="right">
+            <button class="btn btn-ok btn-sm" id="chatSetOpen">باز</button>
+            <button class="btn btn-warn btn-sm" id="chatSetReview">در بررسی</button>
+            <button class="btn btn-danger btn-sm" id="chatSetClose">بستن</button>
+          </div>
+        </div>
+        <div id="chatUserInfo" class="account-card" style="margin-bottom:12px"></div>
+        <div id="chatMsgs" style="max-height:360px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:12px"></div>
+        <div class="row">
+          <div class="field" style="flex:1"><textarea id="chatReply" rows="2" placeholder="پاسخ به کاربر…"></textarea></div>
+          <button class="btn btn-primary" id="chatReplyBtn" style="height:46px;min-width:100px">ارسال</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-tickets">
+      <div class="card">
+        <div class="toolbar">
+          <h2 style="margin:0">🎫 تیکت‌ها</h2>
+          <div class="right">
+            <button class="btn btn-ghost btn-sm filter-tkt active" data-tf="all">همه</button>
+            <button class="btn btn-ghost btn-sm filter-tkt" data-tf="open">باز</button>
+            <button class="btn btn-ghost btn-sm filter-tkt" data-tf="reviewing">در بررسی</button>
+            <button class="btn btn-ghost btn-sm filter-tkt" data-tf="answered">پاسخ‌داده</button>
+            <button class="btn btn-ghost btn-sm filter-tkt" data-tf="closed">بسته</button>
+            <button class="btn btn-ghost btn-sm" id="refreshTktBtn">↻</button>
+          </div>
+        </div>
+        <div class="stats" id="tktStats"></div>
+        <div id="tktList"></div>
+        <div class="empty" id="tktEmpty" style="display:none">تیکتی نیست</div>
+      </div>
+      <div class="card" id="tktDetail" style="display:none">
+        <h2 id="tktDetailTitle">تیکت</h2>
+        <div id="tktUserInfo" class="account-card" style="margin-bottom:12px"></div>
+        <div id="tktBodyView" style="font-size:.9rem;line-height:1.8;margin-bottom:12px;padding:12px;background:rgba(0,0,0,.2);border-radius:12px"></div>
+        <div id="tktReplies" style="margin-bottom:12px"></div>
+        <div class="row" style="margin-bottom:10px">
+          <button class="btn btn-ghost btn-sm" data-ts="open">باز</button>
+          <button class="btn btn-warn btn-sm" data-ts="reviewing">در بررسی</button>
+          <button class="btn btn-ok btn-sm" data-ts="answered">پاسخ‌داده</button>
+          <button class="btn btn-danger btn-sm" data-ts="closed">بستن</button>
+        </div>
+        <div class="row">
+          <div class="field" style="flex:1"><textarea id="tktReply" rows="2" placeholder="پاسخ تیکت…"></textarea></div>
+          <button class="btn btn-primary" id="tktReplyBtn" style="height:46px;min-width:100px">ارسال پاسخ</button>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- Confirm modal -->
   <div class="modal-bg" id="confirmModal">
     <div class="modal">
       <h3 id="confirmTitle">تأیید</h3>
@@ -561,6 +634,8 @@
         document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
         if (tab.dataset.tab === 'tokens') loadTokens();
         if (tab.dataset.tab === 'pro') loadPro();
+        if (tab.dataset.tab === 'chats') loadChats();
+        if (tab.dataset.tab === 'tickets') loadTickets();
       };
     });
 
@@ -832,8 +907,195 @@
     document.getElementById('refreshAllBtn').onclick = () => {
       loadTokens();
       loadPro();
+      try { loadChats(); } catch(e) {}
+      try { loadTickets(); } catch(e) {}
       toast('بروز شد');
     };
+
+    /* —— Support admin —— */
+    let chatFilter = 'all', tktFilter = 'all';
+    let currentChatId = null, currentTktId = null;
+
+    function stLabel(s) {
+      return ({ open:'باز', reviewing:'در حال بررسی', closed:'بسته', answered:'پاسخ‌داده‌شده' })[s] || s;
+    }
+    function stPill(s) {
+      const cls = s === 'open' ? 'pill-ok' : s === 'reviewing' ? 'pill-warn' : s === 'answered' ? 'pill-gold' : 'pill-err';
+      return `<span class="pill ${cls}">${stLabel(s)}</span>`;
+    }
+    function proHtml(u) {
+      if (!u || !u.pro) return '<span class="pill pill-muted">رایگان</span>';
+      if (u.pro.isPro) {
+        const exp = u.pro.unlimited ? 'نامحدود' : (u.pro.expiresAt ? faDate(u.pro.expiresAt) : '—');
+        const act = u.pro.lastActivated ? faDate(u.pro.lastActivated) : '—';
+        return `<span class="pill pill-gold">پرو ⭐</span> <span class="hint">فعال: ${act} · پایان: ${exp}</span>`;
+      }
+      return '<span class="pill pill-muted">رایگان</span>';
+    }
+
+    async function loadChats() {
+      try {
+        const r = await api('/admin/support/chats', { filter: chatFilter });
+        const list = r.chats || [];
+        document.getElementById('chatStats').innerHTML = `
+          <div class="stat"><div class="n">${list.length}</div><div class="l">گفتگو</div></div>
+          <div class="stat"><div class="n">${list.filter(c=>c.status==='reviewing').length}</div><div class="l">در بررسی</div></div>
+          <div class="stat"><div class="n">${list.reduce((a,c)=>a+(c.unreadAdmin||0),0)}</div><div class="l">خوانده‌نشده</div></div>`;
+        const box = document.getElementById('chatList');
+        const empty = document.getElementById('chatEmpty');
+        if (!list.length) { box.innerHTML=''; empty.style.display='block'; return; }
+        empty.style.display='none';
+        box.innerHTML = list.map(c => `
+          <div class="card" style="padding:14px;margin-bottom:10px;cursor:pointer;border-color:${c.id===currentChatId?'var(--accent)':'var(--border)'}" data-cid="${c.id}">
+            <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+              <div>
+                <b>${esc(c.user?.name || c.userName || '—')}</b>
+                <span class="ltr" style="color:var(--accent2);font-size:.8rem;margin-right:8px">${esc(c.userCode)}</span>
+                ${(c.unreadAdmin||0) > 0 ? `<span class="pill pill-err">${c.unreadAdmin} جدید</span>` : ''}
+              </div>
+              ${stPill(c.status)}
+            </div>
+            <div class="hint" style="margin-top:6px">${esc(c.categoryLabel || c.category)} · ${faDate(c.updatedAt)} · ${c.messageCount||0} پیام</div>
+            <div style="margin-top:6px">${proHtml(c.user)}</div>
+          </div>`).join('');
+        box.querySelectorAll('[data-cid]').forEach(el => {
+          el.onclick = () => openChat(el.dataset.cid);
+        });
+      } catch (e) { toast('خطا: ' + e.message); }
+    }
+
+    async function openChat(id) {
+      currentChatId = id;
+      try {
+        const r = await api('/admin/support/chat/get', { chatId: id });
+        const chat = r.chat;
+        const user = r.user || {};
+        document.getElementById('chatDetail').style.display = 'block';
+        document.getElementById('chatDetailTitle').textContent = (user.name || chat.userName) + ' · ' + (chat.categoryLabel || '');
+        document.getElementById('chatUserInfo').innerHTML = `
+          <div class="code">${esc(user.code || chat.userCode)}</div>
+          <div>نام: <b>${esc(user.name || chat.userName)}</b></div>
+          <div style="margin-top:6px">${proHtml(user)}</div>
+          <div class="hint" style="margin-top:6px">عضویت: ${faDate(user.createdAt)} · وضعیت: ${stLabel(chat.status)}</div>`;
+        const box = document.getElementById('chatMsgs');
+        box.innerHTML = (chat.messages || []).map(msg => {
+          const mine = msg.role === 'support';
+          const sys = msg.system || msg.auto;
+          return `<div style="align-self:${mine?'flex-end':'flex-start'};max-width:85%;padding:10px 12px;border-radius:12px;font-size:.85rem;line-height:1.7;white-space:pre-wrap;background:${mine?(sys?'rgba(148,163,184,.15)':'rgba(124,108,240,.25)'):'rgba(240,193,75,.12)'}">${esc(msg.text)}<div style="font-size:.7rem;opacity:.6;margin-top:4px">${faDate(msg.at)}${sys?' · سیستم':''}</div></div>`;
+        }).join('');
+        box.scrollTop = box.scrollHeight;
+        loadChats();
+      } catch (e) { toast('خطا: ' + e.message); }
+    }
+
+    document.getElementById('chatReplyBtn').onclick = async () => {
+      if (!currentChatId) return;
+      const text = document.getElementById('chatReply').value.trim();
+      if (!text) return toast('پیام خالی است');
+      try {
+        await api('/admin/support/chat/reply', { chatId: currentChatId, text });
+        document.getElementById('chatReply').value = '';
+        toast('پاسخ ارسال شد');
+        openChat(currentChatId);
+      } catch (e) { toast('خطا: ' + e.message); }
+    };
+    async function setChatStatus(st) {
+      if (!currentChatId) return;
+      try {
+        await api('/admin/support/chat/status', { chatId: currentChatId, status: st });
+        toast('وضعیت: ' + stLabel(st));
+        openChat(currentChatId);
+        loadChats();
+      } catch (e) { toast('خطا: ' + e.message); }
+    }
+    document.getElementById('chatSetOpen').onclick = () => setChatStatus('open');
+    document.getElementById('chatSetReview').onclick = () => setChatStatus('reviewing');
+    document.getElementById('chatSetClose').onclick = () => setChatStatus('closed');
+    document.getElementById('refreshChatsBtn').onclick = loadChats;
+    document.querySelectorAll('.filter-chat').forEach(b => {
+      b.onclick = () => {
+        document.querySelectorAll('.filter-chat').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        chatFilter = b.dataset.cf;
+        loadChats();
+      };
+    });
+
+    async function loadTickets() {
+      try {
+        const r = await api('/admin/support/tickets', { filter: tktFilter });
+        const list = r.tickets || [];
+        document.getElementById('tktStats').innerHTML = `
+          <div class="stat"><div class="n">${list.length}</div><div class="l">تیکت</div></div>
+          <div class="stat"><div class="n">${list.filter(t=>t.status==='open').length}</div><div class="l">باز</div></div>
+          <div class="stat"><div class="n">${list.filter(t=>t.priority==='high').length}</div><div class="l">اولویت بالا</div></div>`;
+        const box = document.getElementById('tktList');
+        const empty = document.getElementById('tktEmpty');
+        if (!list.length) { box.innerHTML=''; empty.style.display='block'; return; }
+        empty.style.display='none';
+        box.innerHTML = list.map(t => `
+          <div class="card" style="padding:14px;margin-bottom:10px;cursor:pointer" data-tid="${t.id}">
+            <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+              <b>${esc(t.subject)}</b>
+              ${stPill(t.status)}
+            </div>
+            <div class="hint" style="margin-top:6px">${esc(t.user?.name || t.userName)} · <span class="ltr">${esc(t.userCode)}</span> · ${esc(t.categoryLabel||'')} · ${t.priority==='high'?'🔴':'—'} · ${faDate(t.updatedAt)}</div>
+            <div style="margin-top:6px">${proHtml(t.user)}</div>
+          </div>`).join('');
+        box.querySelectorAll('[data-tid]').forEach(el => {
+          el.onclick = () => openTicket(el.dataset.tid, list.find(x => x.id === el.dataset.tid));
+        });
+      } catch (e) { toast('خطا: ' + e.message); }
+    }
+
+    function openTicket(id, t) {
+      currentTktId = id;
+      if (!t) return;
+      document.getElementById('tktDetail').style.display = 'block';
+      document.getElementById('tktDetailTitle').textContent = t.subject;
+      document.getElementById('tktUserInfo').innerHTML = `
+        <div class="code">${esc(t.userCode)}</div>
+        <div>نام: <b>${esc(t.user?.name || t.userName)}</b> · ${stPill(t.status)}</div>
+        <div style="margin-top:6px">${proHtml(t.user)}</div>`;
+      document.getElementById('tktBodyView').innerHTML = `<b>${esc(t.categoryLabel||'')}</b><br>${esc(t.body)}`;
+      document.getElementById('tktReplies').innerHTML = (t.replies||[]).map(r =>
+        `<div style="padding:10px;margin-bottom:8px;background:rgba(124,108,240,.12);border-radius:10px;font-size:.85rem">${esc(r.text)}<div class="hint">${faDate(r.at)}</div></div>`
+      ).join('') || '<div class="hint">هنوز پاسخی نیست</div>';
+    }
+
+    document.getElementById('tktReplyBtn').onclick = async () => {
+      if (!currentTktId) return;
+      const text = document.getElementById('tktReply').value.trim();
+      if (!text) return toast('پاسخ خالی است');
+      try {
+        const r = await api('/admin/support/ticket/reply', { ticketId: currentTktId, text });
+        document.getElementById('tktReply').value = '';
+        toast('پاسخ ثبت شد');
+        openTicket(currentTktId, r.ticket);
+        loadTickets();
+      } catch (e) { toast('خطا: ' + e.message); }
+    };
+    document.querySelectorAll('[data-ts]').forEach(b => {
+      b.onclick = async () => {
+        if (!currentTktId) return;
+        try {
+          const r = await api('/admin/support/ticket/status', { ticketId: currentTktId, status: b.dataset.ts });
+          toast('وضعیت عوض شد');
+          openTicket(currentTktId, r.ticket);
+          loadTickets();
+        } catch (e) { toast('خطا: ' + e.message); }
+      };
+    });
+    document.getElementById('refreshTktBtn').onclick = loadTickets;
+    document.querySelectorAll('.filter-tkt').forEach(b => {
+      b.onclick = () => {
+        document.querySelectorAll('.filter-tkt').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        tktFilter = b.dataset.tf;
+        loadTickets();
+      };
+    });
+
   </script>
 </body>
 </html>

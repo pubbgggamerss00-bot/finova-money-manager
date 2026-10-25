@@ -1,5 +1,5 @@
 /**
- * فینوا — API (Cloudflare Worker) v5
+ * فینوا — API (Cloudflare Worker) v6
  * Variables: ADMIN_SECRET (Secret)
  * Bindings: TOKENS (KV Namespace)
  *
@@ -107,7 +107,7 @@ export default {
     const path = url.pathname.replace(/\/+$/, '') || '/';
 
     if (path === '/' || path === '/health') {
-      return json({ ok: true, service: 'finova-token-api', version: 5 });
+      return json({ ok: true, service: 'finova-token-api', version: 6 });
     }
 
     let body = {};
@@ -370,6 +370,367 @@ export default {
         return json({ ok: false, msg: 'خطا در خواندن داده ابری' });
       }
     }
+
+
+    // ═══════════ SUPPORT — چت و تیکت ═══════════
+    const SUPPORT_CATS = {
+      technical: 'مشکلات فنی',
+      payment: 'خرید و اشتراک پرو',
+      account: 'حساب کاربری',
+      data: 'پشتیبان و داده',
+      feature: 'پیشنهاد و انتقاد',
+      other: 'سایر',
+    };
+
+    function uid(prefix) {
+      const b = new Uint8Array(8);
+      crypto.getRandomValues(b);
+      return (prefix || 'id') + '_' + Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function authUser(env, body) {
+      const code = String(body.code || '').trim().toUpperCase();
+      const passHash = String(body.passHash || '');
+      if (!code || !passHash) return { error: 'احراز هویت ناقص است' };
+      const user = await findUserByCode(env, code);
+      if (!user) return { error: 'حساب در سرور یافت نشد' };
+      if (user.passHash !== passHash) return { error: 'احراز هویت ناموفق' };
+      return { user, code };
+    }
+
+    async function listByPrefix(env, prefix) {
+      const out = [];
+      let cursor;
+      do {
+        const page = await env.TOKENS.list({ prefix, cursor, limit: 100 });
+        for (const k of page.keys) {
+          const v = await env.TOKENS.get(k.name);
+          if (v) { try { out.push(JSON.parse(v)); } catch (e) {} }
+        }
+        cursor = page.list_complete ? null : page.cursor;
+      } while (cursor);
+      return out;
+    }
+
+    function proInfo(user) {
+      const pro = (user && user.proSnapshot) || {};
+      const exp = pro.expiresAt || 0;
+      const active = exp > Date.now() || exp > 8e15;
+      return {
+        isPro: !!active,
+        expiresAt: exp || null,
+        lastActivated: pro.lastActivated || null,
+        unlimited: exp > 8e15,
+      };
+    }
+
+    // کاربر: شروع چت
+    if (path === '/support/chat/start' && request.method === 'POST') {
+      const auth = await authUser(env, body);
+      if (auth.error) return json({ ok: false, msg: auth.error });
+      const category = String(body.category || 'other');
+      if (!SUPPORT_CATS[category]) return json({ ok: false, msg: 'دسته نامعتبر است' });
+
+      // اگر چت باز/در حال بررسی دارد همان را برگردان
+      const all = await listByPrefix(env, 'schat:');
+      let existing = all
+        .filter(c => c.userCode === auth.code && (c.status === 'open' || c.status === 'reviewing'))
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+
+      if (existing) {
+        return json({ ok: true, chat: existing, resumed: true });
+      }
+
+      const id = uid('chat');
+      const now = Date.now();
+      const welcome = {
+        id: uid('m'),
+        role: 'support',
+        text: 'سلام 👋 به پشتیبانی فینوا خوش آمدید.\\nدر بخش «' + SUPPORT_CATS[category] + '» چطور می‌توانیم کمکتان کنیم؟',
+        at: now,
+        auto: true,
+      };
+      const chat = {
+        id,
+        userCode: auth.code,
+        userName: auth.user.name || body.name || auth.code,
+        category,
+        categoryLabel: SUPPORT_CATS[category],
+        status: 'open', // open | reviewing | closed
+        messages: [welcome],
+        createdAt: now,
+        updatedAt: now,
+        lastUserAt: null,
+        lastSupportAt: now,
+        unreadAdmin: 0,
+      };
+      await env.TOKENS.put('schat:' + id, JSON.stringify(chat));
+      return json({ ok: true, chat, resumed: false });
+    }
+
+    // کاربر: ارسال پیام
+    if (path === '/support/chat/send' && request.method === 'POST') {
+      const auth = await authUser(env, body);
+      if (auth.error) return json({ ok: false, msg: auth.error });
+      const chatId = String(body.chatId || '');
+      const text = String(body.text || '').trim().slice(0, 2000);
+      if (!chatId || !text) return json({ ok: false, msg: 'پیام خالی است' });
+      const raw = await env.TOKENS.get('schat:' + chatId);
+      if (!raw) return json({ ok: false, msg: 'گفتگو یافت نشد' });
+      let chat;
+      try { chat = JSON.parse(raw); } catch (e) { return json({ ok: false, msg: 'خطا' }); }
+      if (chat.userCode !== auth.code) return json({ ok: false, msg: 'دسترسی غیرمجاز' });
+      if (chat.status === 'closed') return json({ ok: false, msg: 'این گفتگو بسته شده است' });
+
+      // فقط وقتی مجاز است که منتظر پاسخ ادمین نباشد
+      const msgs = chat.messages || [];
+      const lastUserIdx = [...msgs].reverse().findIndex(m => m.role === 'user');
+      const lastSupportAfterUser = lastUserIdx >= 0
+        ? msgs.slice(msgs.length - lastUserIdx).some(m => m.role === 'support' && !m.auto)
+        : true;
+      // اگر آخرین پیام واقعی کاربر بوده و هنوز ادمین جواب نداده
+      let canSend = true;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'user') { canSend = false; break; }
+        if (msgs[i].role === 'support' && !msgs[i].system) { canSend = true; break; }
+        if (msgs[i].role === 'support' && msgs[i].auto && msgs[i].system) continue;
+      }
+      // ساده‌تر: اگر status === reviewing و آخرین پیام غیرسیستم از user باشد
+      const lastReal = [...msgs].reverse().find(m => !m.system);
+      if (lastReal && lastReal.role === 'user' && chat.status === 'reviewing') {
+        return json({ ok: false, msg: 'پیام قبلی‌ات در حال بررسی است. تا پاسخ پشتیبان صبر کن.' });
+      }
+
+      const now = Date.now();
+      chat.messages.push({ id: uid('m'), role: 'user', text, at: now });
+      chat.messages.push({
+        id: uid('m'), role: 'support', system: true, auto: true,
+        text: '✅ پیام شما دریافت شد و در حال بررسی است. به‌محض پاسخ پشتیبان به شما اطلاع می‌دهیم.',
+        at: now + 1,
+      });
+      chat.status = 'reviewing';
+      chat.updatedAt = now;
+      chat.lastUserAt = now;
+      chat.unreadAdmin = (chat.unreadAdmin || 0) + 1;
+      chat.userName = auth.user.name || chat.userName;
+      await env.TOKENS.put('schat:' + chatId, JSON.stringify(chat));
+      return json({ ok: true, chat });
+    }
+
+    // کاربر: دریافت پیام‌ها
+    if (path === '/support/chat/get' && request.method === 'POST') {
+      const auth = await authUser(env, body);
+      if (auth.error) return json({ ok: false, msg: auth.error });
+      const chatId = String(body.chatId || '');
+      const raw = await env.TOKENS.get('schat:' + chatId);
+      if (!raw) return json({ ok: false, msg: 'گفتگو یافت نشد' });
+      let chat;
+      try { chat = JSON.parse(raw); } catch (e) { return json({ ok: false, msg: 'خطا' }); }
+      if (chat.userCode !== auth.code) return json({ ok: false, msg: 'دسترسی غیرمجاز' });
+      return json({ ok: true, chat });
+    }
+
+    // کاربر: لیست چت‌هایش
+    if (path === '/support/chat/mine' && request.method === 'POST') {
+      const auth = await authUser(env, body);
+      if (auth.error) return json({ ok: false, msg: auth.error });
+      const all = await listByPrefix(env, 'schat:');
+      const mine = all.filter(c => c.userCode === auth.code)
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      return json({ ok: true, chats: mine });
+    }
+
+    // کاربر: ثبت تیکت
+    if (path === '/support/ticket/create' && request.method === 'POST') {
+      const auth = await authUser(env, body);
+      if (auth.error) return json({ ok: false, msg: auth.error });
+      const category = String(body.category || 'other');
+      const subject = String(body.subject || '').trim().slice(0, 120);
+      const bodyText = String(body.body || '').trim().slice(0, 4000);
+      const priority = ['low', 'normal', 'high'].includes(body.priority) ? body.priority : 'normal';
+      if (!SUPPORT_CATS[category]) return json({ ok: false, msg: 'دسته نامعتبر' });
+      if (subject.length < 3) return json({ ok: false, msg: 'موضوع خیلی کوتاه است' });
+      if (bodyText.length < 10) return json({ ok: false, msg: 'متن تیکت را کامل‌تر بنویس' });
+      const id = uid('tkt');
+      const now = Date.now();
+      const ticket = {
+        id,
+        userCode: auth.code,
+        userName: auth.user.name || body.name || auth.code,
+        category,
+        categoryLabel: SUPPORT_CATS[category],
+        subject,
+        body: bodyText,
+        priority,
+        status: 'open', // open | reviewing | answered | closed
+        replies: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+      await env.TOKENS.put('stkt:' + id, JSON.stringify(ticket));
+      return json({ ok: true, ticket });
+    }
+
+    if (path === '/support/ticket/mine' && request.method === 'POST') {
+      const auth = await authUser(env, body);
+      if (auth.error) return json({ ok: false, msg: auth.error });
+      const all = await listByPrefix(env, 'stkt:');
+      const mine = all.filter(t => t.userCode === auth.code)
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      return json({ ok: true, tickets: mine });
+    }
+
+    if (path === '/support/ticket/get' && request.method === 'POST') {
+      const auth = await authUser(env, body);
+      if (auth.error) return json({ ok: false, msg: auth.error });
+      const id = String(body.ticketId || '');
+      const raw = await env.TOKENS.get('stkt:' + id);
+      if (!raw) return json({ ok: false, msg: 'تیکت یافت نشد' });
+      let ticket;
+      try { ticket = JSON.parse(raw); } catch (e) { return json({ ok: false, msg: 'خطا' }); }
+      if (ticket.userCode !== auth.code) return json({ ok: false, msg: 'دسترسی غیرمجاز' });
+      return json({ ok: true, ticket });
+    }
+
+    // —— ادمین: لیست چت‌ها ——
+    if (path === '/admin/support/chats' && request.method === 'POST') {
+      if (!isAdmin) return json({ ok: false, msg: 'دسترسی غیرمجاز' }, 401);
+      let list = await listByPrefix(env, 'schat:');
+      const filter = String(body.filter || 'all');
+      if (filter !== 'all') list = list.filter(c => c.status === filter);
+      list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      // غنی‌سازی با اطلاعات کاربر
+      const enriched = [];
+      for (const c of list) {
+        const user = await findUserByCode(env, c.userCode);
+        enriched.push({
+          ...c,
+          messagesPreview: (c.messages || []).slice(-3),
+          messageCount: (c.messages || []).length,
+          user: user ? {
+            name: user.name,
+            code: user.code,
+            createdAt: user.createdAt,
+            pro: proInfo(user),
+          } : { name: c.userName, code: c.userCode, pro: { isPro: false } },
+        });
+      }
+      return json({ ok: true, chats: enriched, total: enriched.length });
+    }
+
+    if (path === '/admin/support/chat/get' && request.method === 'POST') {
+      if (!isAdmin) return json({ ok: false, msg: 'دسترسی غیرمجاز' }, 401);
+      const chatId = String(body.chatId || '');
+      const raw = await env.TOKENS.get('schat:' + chatId);
+      if (!raw) return json({ ok: false, msg: 'گفتگو یافت نشد' });
+      let chat;
+      try { chat = JSON.parse(raw); } catch (e) { return json({ ok: false, msg: 'خطا' }); }
+      const user = await findUserByCode(env, chat.userCode);
+      // علامت خوانده‌شده
+      chat.unreadAdmin = 0;
+      await env.TOKENS.put('schat:' + chatId, JSON.stringify(chat));
+      return json({
+        ok: true,
+        chat,
+        user: user ? { name: user.name, code: user.code, createdAt: user.createdAt, pro: proInfo(user) }
+          : { name: chat.userName, code: chat.userCode, pro: { isPro: false } },
+      });
+    }
+
+    if (path === '/admin/support/chat/reply' && request.method === 'POST') {
+      if (!isAdmin) return json({ ok: false, msg: 'دسترسی غیرمجاز' }, 401);
+      const chatId = String(body.chatId || '');
+      const text = String(body.text || '').trim().slice(0, 4000);
+      if (!text) return json({ ok: false, msg: 'پیام خالی است' });
+      const raw = await env.TOKENS.get('schat:' + chatId);
+      if (!raw) return json({ ok: false, msg: 'گفتگو یافت نشد' });
+      let chat;
+      try { chat = JSON.parse(raw); } catch (e) { return json({ ok: false, msg: 'خطا' }); }
+      if (chat.status === 'closed') return json({ ok: false, msg: 'گفتگو بسته است — اول بازش کن' });
+      const now = Date.now();
+      chat.messages.push({ id: uid('m'), role: 'support', text, at: now, auto: false });
+      chat.status = 'open'; // کاربر می‌تواند دوباره پیام بدهد
+      chat.updatedAt = now;
+      chat.lastSupportAt = now;
+      chat.unreadAdmin = 0;
+      await env.TOKENS.put('schat:' + chatId, JSON.stringify(chat));
+      return json({ ok: true, chat });
+    }
+
+    if (path === '/admin/support/chat/status' && request.method === 'POST') {
+      if (!isAdmin) return json({ ok: false, msg: 'دسترسی غیرمجاز' }, 401);
+      const chatId = String(body.chatId || '');
+      const status = String(body.status || '');
+      if (!['open', 'reviewing', 'closed'].includes(status)) return json({ ok: false, msg: 'وضعیت نامعتبر' });
+      const raw = await env.TOKENS.get('schat:' + chatId);
+      if (!raw) return json({ ok: false, msg: 'گفتگو یافت نشد' });
+      let chat;
+      try { chat = JSON.parse(raw); } catch (e) { return json({ ok: false, msg: 'خطا' }); }
+      chat.status = status;
+      chat.updatedAt = Date.now();
+      if (status === 'closed') {
+        chat.messages.push({
+          id: uid('m'), role: 'support', system: true, auto: true,
+          text: 'این گفتگو توسط پشتیبانی بسته شد. در صورت نیاز گفتگوی جدید شروع کنید.',
+          at: Date.now(),
+        });
+      }
+      await env.TOKENS.put('schat:' + chatId, JSON.stringify(chat));
+      return json({ ok: true, chat });
+    }
+
+    // ادمین: تیکت‌ها
+    if (path === '/admin/support/tickets' && request.method === 'POST') {
+      if (!isAdmin) return json({ ok: false, msg: 'دسترسی غیرمجاز' }, 401);
+      let list = await listByPrefix(env, 'stkt:');
+      const filter = String(body.filter || 'all');
+      if (filter !== 'all') list = list.filter(t => t.status === filter);
+      list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      const enriched = [];
+      for (const t of list) {
+        const user = await findUserByCode(env, t.userCode);
+        enriched.push({
+          ...t,
+          user: user ? { name: user.name, code: user.code, createdAt: user.createdAt, pro: proInfo(user) }
+            : { name: t.userName, code: t.userCode, pro: { isPro: false } },
+        });
+      }
+      return json({ ok: true, tickets: enriched, total: enriched.length });
+    }
+
+    if (path === '/admin/support/ticket/reply' && request.method === 'POST') {
+      if (!isAdmin) return json({ ok: false, msg: 'دسترسی غیرمجاز' }, 401);
+      const id = String(body.ticketId || '');
+      const text = String(body.text || '').trim().slice(0, 4000);
+      if (!text) return json({ ok: false, msg: 'پاسخ خالی است' });
+      const raw = await env.TOKENS.get('stkt:' + id);
+      if (!raw) return json({ ok: false, msg: 'تیکت یافت نشد' });
+      let ticket;
+      try { ticket = JSON.parse(raw); } catch (e) { return json({ ok: false, msg: 'خطا' }); }
+      const now = Date.now();
+      ticket.replies = ticket.replies || [];
+      ticket.replies.push({ id: uid('r'), role: 'support', text, at: now });
+      ticket.status = 'answered';
+      ticket.updatedAt = now;
+      await env.TOKENS.put('stkt:' + id, JSON.stringify(ticket));
+      return json({ ok: true, ticket });
+    }
+
+    if (path === '/admin/support/ticket/status' && request.method === 'POST') {
+      if (!isAdmin) return json({ ok: false, msg: 'دسترسی غیرمجاز' }, 401);
+      const id = String(body.ticketId || '');
+      const status = String(body.status || '');
+      if (!['open', 'reviewing', 'answered', 'closed'].includes(status)) return json({ ok: false, msg: 'وضعیت نامعتبر' });
+      const raw = await env.TOKENS.get('stkt:' + id);
+      if (!raw) return json({ ok: false, msg: 'تیکت یافت نشد' });
+      let ticket;
+      try { ticket = JSON.parse(raw); } catch (e) { return json({ ok: false, msg: 'خطا' }); }
+      ticket.status = status;
+      ticket.updatedAt = Date.now();
+      await env.TOKENS.put('stkt:' + id, JSON.stringify(ticket));
+      return json({ ok: true, ticket });
+    }
+
 
     return json({ ok: false, msg: 'مسیر نامعتبر' }, 404);
 
