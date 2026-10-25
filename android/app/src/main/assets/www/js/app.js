@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.14.0';
+  const APP_VERSION = '1.15.0';
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -338,6 +338,9 @@ const App = (() => {
       const regs = getRegistry(); const me = regs.find(x => x.code === (state.account && state.account.code));
       if (me) { me.proSnapshot = state.pro; me.trialStart = state.trialStart || 0; me.quotaSnapshot = state.quota; setRegistry(regs); }
     } catch (e) {}
+    // v1.15.0 — فعال‌سازی پرو فوراً در ابر هم ثبت می‌شود (تا ورود از گوشی دیگر پرو را برگرداند)
+    try { await saveAccBlobLocalOnly(); } catch (e) {}
+    try { await cloudUploadBlob(); } catch (e) {}
     removeTrialTimer();
     return { ok: true, info };
   }
@@ -554,13 +557,28 @@ const App = (() => {
       await loadAccSession(reg, true);
       state.trialStart = Date.now();                // 🎁 ۲۴ ساعت دوره تست (فقط قابلیت‌های رایگان)
       state.account = { name, code, createdAt: reg.createdAt };
-      await saveState(); await saveAccBlob();
-      // ثبت در سرور (اختیاری اگر آفلاین باشد؛ بعداً هم می‌تواند کار کند) — ورود از هر گوشی دیگر را ممکن می‌کند
+      await saveState(); await saveAccBlobLocalOnly();
+      // v1.15.0 — ثبت ابری برای ورود از گوشی دیگر ضروری است؛ اگر نام روی سرور تکراری باشد ثبت‌نام برمی‌گردد
       try {
         const cr = await cloudRegister(reg);
-        if (cr && cr.ok) UI.toast('حساب در سرور هم ثبت شد ☁️', 'ok');
-        else if (cr && !cr.offline) console.warn('cloud register:', cr.msg);
-      } catch (e) {}
+        if (cr && cr.ok) {
+          try { await cloudUploadBlob(); } catch (e2) {}
+          UI.toast('حساب در سرور ثبت شد ☁️', 'ok');
+        } else if (cr && cr.offline) {
+          UI.toast('آفلاین هستی — حساب فقط روی این گوشی ذخیره شد. با اینترنت یک‌بار وارد شو تا در سرور ثبت شود.', 'warn');
+        } else if (cr && cr.msg) {
+          // اگر نام تکراری روی سرور است، رجیستری محلی را برگردان
+          if (/ثبت شده|وجود|exists|قبلاً/i.test(cr.msg || '')) {
+            const regs2 = getRegistry().filter(r => r.code !== code);
+            setRegistry(regs2); setSession('');
+            showErr(cr.msg);
+            return;
+          }
+          UI.toast('ثبت سرور: ' + cr.msg, 'warn');
+        }
+      } catch (e) {
+        UI.toast('ثبت سرور انجام نشد — بعداً با اینترنت همگام می‌شود', 'warn');
+      }
       sc.classList.add('hidden');
       unlocked = true;
       const m = UI.modal('🎉 خوش آمدی ' + esc(name) + '!', `
@@ -579,75 +597,91 @@ const App = (() => {
       const el = document.getElementById(id);
       if (el) el.onkeydown = e => { if (e.key === 'Enter') submit(); };
     });
-    /* — ورود به حساب کاربری موجود (روی همین گوشی یا از سرور ابری) — */
+    /* — ورود به حساب کاربری موجود (v1.15.0 — همیشه اول از سرور، منبع حقیقت) — */
     const doLogin = async () => {
       const name = document.getElementById('loginName').value.trim();
       const pass = document.getElementById('loginPass').value;
       if (!name || !pass) { showErr('نام حساب و رمز را وارد کن'); return; }
+      showErr('در حال بررسی حساب...');
       let regs = getRegistry();
-      let reg = regs.find(r => (r.nameLower || r.name.toLowerCase()) === name.toLowerCase());
+      const localReg = regs.find(r => (r.nameLower || r.name.toLowerCase()) === name.toLowerCase());
       // رکورد بدون passHash (مهاجرت نسخه‌های قدیمی — state.account رمز را نگه نمی‌داشت)
-      // قابل تأیید محلی نیست → مثل نبودن رفتار می‌شود تا از سرور ابری بازسازی/تأیید شود
-      const legacyBlank = !!reg && !reg.passHash;
-      if (legacyBlank) reg = null;
-      // اگر روی این گوشی نبود → ورود ابری از API (همان نام و رمز — سرور تأیید می‌کند)
-      if (!reg) {
-        showErr('در حال بررسی سرور...');
-        const cr = await cloudLogin(name, pass);
-        if (cr && cr.ok && cr.account) {
-          const built = {
-            code: cr.account.code,
-            name: cr.account.name,
-            nameLower: String(cr.account.name || '').toLowerCase(),
-            salt: cr.account.salt || '',
-            passHash: cr.account.passHash || simpleHash(pass + (cr.account.salt || '')),
-            createdAt: cr.account.createdAt || Date.now(),
-            logoutUsed: 0,
-            proSnapshot: cr.account.proSnapshot || null,
-            trialStart: cr.account.trialStart || 0,
-            quotaSnapshot: cr.account.quotaSnapshot || null,
-          };
-          const idx = regs.findIndex(x => x.code === built.code);
-          if (idx >= 0) { regs[idx] = Object.assign({}, regs[idx], built); reg = regs[idx]; }   // رکورد ناقص همین حساب بازسازی می‌شود
-          else { regs.push(built); reg = built; }
-          setRegistry(regs);
-        } else if (legacyBlank) {
-          // حساب قدیمی همین گوشی (رمزی از قبل نداشته) — بدون سرور یا حتی اگر سرور نشناخت، مستقیم وارد می‌شود
-          reg = regs.find(r => (r.nameLower || r.name.toLowerCase()) === name.toLowerCase());
-          if (!reg) { showErr((cr && cr.msg) || 'حسابی با این نام پیدا نشد — اول ثبت‌نام کن'); return; }
-        } else if (cr && cr.offline) {
-          showErr('حساب روی این گوشی نیست و اینترنت هم برقرار نشد');
-          return;
-        } else {
-          showErr((cr && cr.msg) || 'حسابی با این نام پیدا نشد — اول ثبت‌نام کن');
-          return;
-        }
-      } else if (simpleHash(pass + reg.salt) !== reg.passHash) { showErr('رمز حساب اشتباه است'); return; }
+      // قابل تأیید محلی نیست → سازگاری v1.12.0: مستقیم وارد می‌شود
+      const legacyBlank = !!localReg && !localReg.passHash;
+      let reg = null;
+
+      // ۱) همیشه اول از API بپرس (منبع حقیقت): تأیید رمز + به‌روزرسانی پروفایل/پرو
+      const cr = await cloudLogin(name, pass);
+      if (cr && cr.ok && cr.account) {
+        reg = {
+          code: cr.account.code,
+          name: cr.account.name,
+          nameLower: String(cr.account.name || '').toLowerCase(),
+          salt: cr.account.salt || '',
+          passHash: cr.account.passHash || simpleHash(pass + (cr.account.salt || '')),
+          createdAt: cr.account.createdAt || Date.now(),
+          logoutUsed: 0,
+          proSnapshot: cr.account.proSnapshot || null,
+          trialStart: cr.account.trialStart || 0,
+          quotaSnapshot: cr.account.quotaSnapshot || null,
+        };
+        // به‌روزرسانی/افزودن در رجیستری محلی (بر اساس کد یا نام)
+        const idx = regs.findIndex(r => r.code === reg.code || (r.nameLower || r.name.toLowerCase()) === reg.nameLower);
+        if (idx >= 0) regs[idx] = Object.assign({}, regs[idx], reg);   // رکورد محلی با پروفایل تازه سرور به‌روز می‌شود
+        else regs.push(reg);
+        setRegistry(regs);
+      } else if (cr && !cr.offline && cr.msg) {
+        // سرور جواب داد ولی رد کرد (رمز غلط / نبودن حساب روی سرور)
+        // سازگاری نسخه‌های قبل: حساب قدیمی همین گوشی یا حساب محلیِ با رمز معتبر → ورود محلی مجاز
+        if (legacyBlank) { reg = localReg; }
+        else if (localReg && localReg.passHash && simpleHash(pass + localReg.salt) === localReg.passHash) { reg = localReg; }
+        else { showErr(cr.msg); return; }
+      } else {
+        // آفلاین یا خطای شبکه → فقط ورود محلی
+        if (!localReg) { showErr('اینترنت لازم است — حساب روی این گوشی نیست و سرور در دسترس نیست'); return; }
+        if (legacyBlank) { reg = localReg; }
+        else if (simpleHash(pass + localReg.salt) !== localReg.passHash) { showErr('رمز حساب اشتباه است'); return; }
+        reg = localReg;
+      }
+
       err.textContent = '';
       setSession(reg.code);
-      // دریافت داده از ابر (اگر جدیدتر باشد جایگزین می‌شود)
+
+      // ۲) دریافت کامل داده از ابر (تراکنش، پرو، بودجه، …) — سرور مرجع است
       let usedCloud = false;
       try {
         const dl = await cloudDownloadBlob(reg.code, reg.passHash);
         if (dl && dl.ok && dl.blob && dl.blob.state) {
-          const localBlob = await Store.get('kv', accDataKey(reg.code));
-          const localAt = (localBlob && localBlob.savedAt) || 0;
-          const cloudAt = dl.savedAt || (dl.blob && dl.blob.savedAt) || 0;
-          if (cloudAt >= localAt) {
-            await applyCloudBlob(dl.blob);
-            usedCloud = true;
-          }
+          await applyCloudBlob(dl.blob);
+          usedCloud = true;
         }
       } catch (e) { console.warn('cloud download', e); }
+
       if (!usedCloud) await loadAccSession(reg, false);
+
+      // اعمال اسنپ‌شات پرو از پروفایل سرور اگر داده ابری خالی بود
+      if (!usedCloud && reg.proSnapshot && reg.proSnapshot.expiresAt) {
+        state.pro = reg.proSnapshot;
+        if (reg.trialStart) state.trialStart = reg.trialStart;
+        if (reg.quotaSnapshot) state.quota = reg.quotaSnapshot;
+      }
+
       if (!state.account) state.account = { name: reg.name, code: reg.code, createdAt: reg.createdAt || Date.now() };
       state.account.name = reg.name;
-      await saveState(); await saveAccBlobLocalOnly();
+      await saveState();
+      await saveAccBlobLocalOnly();
       // بعد از ورود یک بار فوری آپلود کن تا گوشی مبدأ/مقصد هم‌تراز شوند
-      try { cloudUploadBlob(); } catch (e) {}
+      try { await cloudUploadBlob(); } catch (e) {}
+
       sc.classList.add('hidden');
       unlocked = true;
-      UI.toast(usedCloud ? ('خوش برگشتی ' + esc(reg.name) + ' — داده از ابر بارگذاری شد ☁️') : ('خوش برگشتی ' + esc(reg.name) + ' 👋'), 'ok');
+      const proOn = isPro() ? ' — پرو فعال ⭐' : '';
+      UI.toast(
+        usedCloud
+          ? ('خوش برگشتی ' + esc(reg.name) + ' — داده از سرور بارگذاری شد ☁️' + proOn)
+          : ('خوش برگشتی ' + esc(reg.name) + ' 👋' + proOn),
+        'ok'
+      );
       if (state.lock && state.lock.enabled) showLock(); else afterUnlock();
     };
     document.getElementById('loginGoBtn').onclick = doLogin;
