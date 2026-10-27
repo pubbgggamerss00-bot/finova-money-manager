@@ -5,7 +5,7 @@ const App = (() => {
   let curTab = 'dashboard';
   let lastRates = null;
   let unlocked = false;
-  const APP_VERSION = '1.16.0';
+  const APP_VERSION = '1.17.0';
 
   const DEF_CATEGORIES = [
     { id: 'c_rent', name: 'اجاره خانه', icon: '🏠', essential: true, type: 'installment', color: '#f472b6' },
@@ -142,8 +142,8 @@ const App = (() => {
   /* ═══════════ حساب کاربری، اشتراک پرو، توکن و کوارتا ═══════════ */
   const LIC_DAY = 864e5;
   const TOK_ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // ۳۱ نویسه بدون I,L,O,0,1 — برای کد حساب
-  // سرور مرکزی بررسی توکن‌های پرو — همه اطلاعات توکن از اینجا دریافت می‌شود
-  const TOKEN_API = 'https://muddy-finova-5405.amineshgi-1386.workers.dev';
+  // سرور مرکزی بررسی توکن‌های پرو — همه اطلاعات توکن از اینجا دریافت می‌شود (v1.17.0 — مهاجرت به سرور جدید)
+  const TOKEN_API = 'https://finova.ironbooy8668.workers.dev';
   const PRO_UNLIMITED_MS = 8640000000000000; // توکن نامحدود — عملاً بی‌پایان
   const PRO_FEATURES = [
     { ico: '🌐', t: 'هوش مصنوعی آنلاین روزی ۱۰ پیام', s: 'نسخه رایگان فقط ۲ پیام — پرو ۱۰ پیام در روز برای دستیار و تحلیل سرمایه‌گذاری' },
